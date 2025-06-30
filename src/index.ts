@@ -14,7 +14,7 @@ const BUCKET_NAME = process.env.BUCKET_NAME;
 const s3 = new S3Client({ region: REGION });
 const BASE_URL = "https://api.space-invaders.com";
 
-class MyConsumer extends RabbitMQBaseConsumer {
+class FlashConsumer extends RabbitMQBaseConsumer {
   constructor() {
     super("RABBITMQ_QUEUE");
   }
@@ -24,7 +24,7 @@ class MyConsumer extends RabbitMQBaseConsumer {
     const flash: Flash = JSON.parse(content);
     const imageUrl = BASE_URL + flash.img;
     const s3Key = flash.img.replace(/^\//, "");
-    console.log(`[MyConsumer] Downloading image from: ${imageUrl}`);
+    console.log(`[FlashConsumer] Downloading image from: ${imageUrl}`);
     try {
       const response = await axios.get(imageUrl, { responseType: "arraybuffer" });
       const contentType = response.headers["content-type"] || "image/jpeg";
@@ -37,15 +37,15 @@ class MyConsumer extends RabbitMQBaseConsumer {
           ACL: "public-read",
         })
       );
-      console.log(`[MyConsumer] Uploaded image to S3: ${s3Key}`);
+      console.log(`[FlashConsumer] Uploaded image to S3: ${imageUrl}`);
     } catch (err) {
-      console.error("[MyConsumer] Error downloading/uploading image:", err);
+      console.error("[FlashConsumer] Error downloading/uploading image:", err);
       throw err;
     }
   }
 }
 
 (async () => {
-  const consumer = new MyConsumer();
+  const consumer = new FlashConsumer();
   await consumer.startConsuming();
 })();
