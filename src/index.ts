@@ -38,7 +38,6 @@ class FlashConsumer extends RabbitMQBaseConsumer {
     const flash: Flash = JSON.parse(content);
     const imageUrl = BASE_URL + flash.img;
     const s3Key = flash.img.replace(/^\//, "");
-    console.log(`[FlashConsumer] Downloading image from: ${imageUrl}`);
     try {
       const response = await axios.get(imageUrl, {
         responseType: "arraybuffer",
