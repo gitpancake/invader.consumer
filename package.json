@@ -17,6 +17,7 @@
     "node": ">=19.9.0"
   },
   "scripts": {
+    "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsc --watch & nodemon dist/index.js"
   }
