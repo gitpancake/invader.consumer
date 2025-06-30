@@ -1,4 +1,23 @@
 {
   "name": "invaders.consumer",
-  "packageManager": "yarn@4.3.1"
+  "packageManager": "yarn@4.3.1",
+  "devDependencies": {
+    "@types/amqplib": "^0.10.7",
+    "@types/node": "^24.0.7",
+    "nodemon": "^3.1.10",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.839.0",
+    "amqplib": "^0.10.8",
+    "axios": "^1.10.0",
+    "dotenv": "^17.0.0"
+  },
+  "engines": {
+    "node": ">=19.9.0"
+  },
+  "scripts": {
+    "start": "node dist/index.js",
+    "dev": "tsc --watch & nodemon dist/index.js"
+  }
 }
