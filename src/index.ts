@@ -30,7 +30,7 @@ function getRandomUserAgent(): string {
 
 class FlashConsumer extends RabbitMQBaseConsumer {
   constructor() {
-    super("RABBITMQ_QUEUE");
+    super();
   }
 
   protected async handleMessage(msg: ConsumeMessage): Promise<void> {

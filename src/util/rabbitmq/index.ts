@@ -7,12 +7,12 @@ export abstract class RabbitMQBaseConsumer {
   protected rabbitUrl: string;
   protected queue: string;
 
-  constructor(queueEnvVar: string) {
+  constructor() {
     this.rabbitUrl = process.env.RABBITMQ_URL!;
     this.queue = process.env.RABBITMQ_QUEUE!;
 
     if (!this.rabbitUrl) throw new Error("RABBITMQ_URL is not defined in the environment variables");
-    if (!this.queue) throw new Error(`${queueEnvVar} is not defined in the environment variables`);
+    if (!this.queue) throw new Error(`RABBITMQ_QUEUE is not defined in the environment variables`);
   }
 
   protected abstract handleMessage(msg: ConsumeMessage): Promise<void>;
