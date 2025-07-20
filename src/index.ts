@@ -125,12 +125,12 @@ class FlashConsumer extends RabbitMQBaseConsumer {
     try {
       // Add human-like delay before making the request
       const delay = getRandomDelay();
-      console.log(`[FlashConsumer] Waiting ${Math.round(delay)}ms before requesting image...`);
+      // console.log(`[FlashConsumer] Waiting ${Math.round(delay)}ms before requesting image...`);
       await sleep(delay);
 
       const response = await retryRequest(async () => {
         const headers = getRealisticHeaders();
-        console.log(`[FlashConsumer] Requesting image with User-Agent: ${headers["User-Agent"].substring(0, 50)}...`);
+        // console.log(`[FlashConsumer] Requesting image with User-Agent: ${headers["User-Agent"].substring(0, 50)}...`);
 
         return await axios.get(imageUrl, {
           responseType: "arraybuffer",
@@ -161,7 +161,7 @@ class FlashConsumer extends RabbitMQBaseConsumer {
         })
       );
 
-      console.log(`[FlashConsumer] Uploaded image to S3: https://${BUCKET_NAME}.s3.${REGION}.amazonaws.com/${s3Key}`);
+      // console.log(`[FlashConsumer] Uploaded image to S3: https://${BUCKET_NAME}.s3.${REGION}.amazonaws.com/${s3Key}`);
 
       // Add a small delay after successful processing to avoid overwhelming the server
       await sleep(Math.random() * 2000 + 500);
