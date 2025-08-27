@@ -165,7 +165,6 @@ class FlashConsumer extends RabbitMQBaseConsumer {
       const contentType = response.headers["content-type"] || "image/jpeg";
       const contentLength = response.headers["content-length"];
       const fileSize = parseInt(contentLength || "0", 10) || response.data.byteLength;
-      console.log(`[FlashConsumer] Successfully downloaded image (${fileSize} bytes, ${contentType})`);
 
       const filename = originalKey.split('/').pop() || `image_${flash.flash_id}.jpg`;
       let s3Success = false;
@@ -189,7 +188,6 @@ class FlashConsumer extends RabbitMQBaseConsumer {
           })
         );
 
-        console.log(`[FlashConsumer] ✅ S3: https://${BUCKET_NAME}.s3.amazonaws.com/${originalKey}`);
         s3Success = true;
       } catch (s3Error) {
         console.error(`[FlashConsumer] ❌ S3 upload failed:`, s3Error instanceof Error ? s3Error.message : s3Error);
@@ -200,7 +198,6 @@ class FlashConsumer extends RabbitMQBaseConsumer {
         // Apply rate limiting for IPFS uploads
         await ipfsRateLimiter.waitIfNeeded();
         
-        console.log(`[FlashConsumer] 🌐 Uploading to IPFS...`);
         const file = new File([response.data], filename, { type: contentType });
         const formData = new FormData();
         formData.append('file', file);
@@ -215,9 +212,6 @@ class FlashConsumer extends RabbitMQBaseConsumer {
         });
 
         cid = pinataResponse.data.IpfsHash;
-        const ipfsUrl = `ipfs://${cid}`;
-        
-        console.log(`[FlashConsumer] ✅ IPFS: ${ipfsUrl}`);
         ipfsSuccess = true;
       } catch (ipfsError) {
         const errorMsg = ipfsError instanceof Error ? ipfsError.message : 'Unknown error';
@@ -239,11 +233,11 @@ class FlashConsumer extends RabbitMQBaseConsumer {
 
       // 4. Report status
       if (s3Success && ipfsSuccess) {
-        console.log(`[FlashConsumer] ✅ Dual upload complete for flash_id: ${flash.flash_id}`);
+        console.log(`Dual upload complete for flash_id: ${flash.flash_id}, ipfs: ${cid}, s3: ✅`);
       } else if (s3Success) {
-        console.log(`[FlashConsumer] ⚠️  S3 only for flash_id: ${flash.flash_id} (IPFS failed)`);
+        console.log(`Dual upload failed for flash_id: ${flash.flash_id}, reason: IPFS failed`);
       } else if (ipfsSuccess) {
-        console.log(`[FlashConsumer] ⚠️  IPFS only for flash_id: ${flash.flash_id} (S3 failed)`);
+        console.log(`Dual upload failed for flash_id: ${flash.flash_id}, reason: S3 failed`);
       } else {
         throw new Error('Both S3 and IPFS uploads failed');
       }
@@ -267,15 +261,8 @@ class FlashConsumer extends RabbitMQBaseConsumer {
       // Add small processing delay to be gentle on the system
       await sleep(300);
     } catch (err) {
-      console.error("[FlashConsumer] Error downloading/uploading image:", err);
-
-      // Log more detailed error information
-      if (axios.isAxiosError(err)) {
-        console.error(`[FlashConsumer] HTTP Status: ${err.response?.status}`);
-        console.error(`[FlashConsumer] Response Headers:`, err.response?.headers);
-        console.error(`[FlashConsumer] Request URL: ${err.config?.url}`);
-      }
-
+      const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+      console.log(`Dual upload failed for flash_id: ${flash.flash_id}, reason: ${errorMsg}`);
       throw err;
     }
   }
