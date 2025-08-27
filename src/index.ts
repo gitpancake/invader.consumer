@@ -7,6 +7,7 @@ import { RabbitMQBaseConsumer } from "./util/rabbitmq";
 import { RateLimiter } from "./util/rate-limiter";
 import { getPool } from "./util/database";
 import { CSVLogger, IPFSRecord } from "./util/csv-logger";
+import { BatchUpdater } from "./util/batch-updater";
 
 config({
   path: ".env",
@@ -125,8 +126,15 @@ async function retryRequest<T>(requestFn: () => Promise<T>, maxRetries: number =
 }
 
 class FlashConsumer extends RabbitMQBaseConsumer {
+  private dbPool: any;
+  public batchUpdater: BatchUpdater; // Make public for shutdown access
+  
   constructor() {
     super();
+    // Initialize database connection pool early
+    this.dbPool = getPool();
+    // Initialize batch updater for efficient database updates
+    this.batchUpdater = new BatchUpdater(this.dbPool, 600);
   }
 
   protected async handleMessage(msg: ConsumeMessage): Promise<void> {
@@ -220,18 +228,12 @@ class FlashConsumer extends RabbitMQBaseConsumer {
         }
       }
 
-      // 3. Update database with IPFS CID if successful
+      // 3. Add to batch updater if IPFS was successful
       if (ipfsSuccess && cid) {
         try {
-          const pool = getPool();
-          await pool.query(
-            `UPDATE flashes 
-             SET ipfs_cid = $1 
-             WHERE flash_id = $2`,
-            [cid, flash.flash_id]
-          );
-        } catch (dbError) {
-          console.error(`[FlashConsumer] ❌ Database update failed:`, dbError);
+          await this.batchUpdater.addUpdate(flash.flash_id, cid);
+        } catch (batchError) {
+          console.error(`[FlashConsumer] ❌ Batch update failed:`, batchError instanceof Error ? batchError.message : batchError);
         }
       }
 
@@ -282,5 +284,31 @@ class FlashConsumer extends RabbitMQBaseConsumer {
 (async () => {
   const consumer = new FlashConsumer();
   const testMode = process.env.TEST_MODE === "true";
+  
+  // Graceful shutdown handler
+  const shutdown = async (signal: string) => {
+    console.log(`\n[FlashConsumer] Received ${signal}, shutting down gracefully...`);
+    
+    try {
+      // Force flush any remaining batch updates
+      await consumer.batchUpdater.shutdown();
+      console.log(`[FlashConsumer] Batch updater shutdown complete`);
+      
+      // Close database connections
+      const { closePool } = await import('./util/database');
+      await closePool();
+      console.log(`[FlashConsumer] Database connections closed`);
+      
+      process.exit(0);
+    } catch (error) {
+      console.error(`[FlashConsumer] Error during shutdown:`, error);
+      process.exit(1);
+    }
+  };
+  
+  // Register shutdown handlers
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  
   await consumer.startConsuming(testMode);
 })();

@@ -12,9 +12,20 @@ export function getPool(): Pool {
     pool = new Pool({
       connectionString,
       ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
-      max: 10,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 2000,
+      max: 20, // Increased from 10 to handle burst traffic
+      idleTimeoutMillis: 60000, // Increased from 30s to 60s
+      connectionTimeoutMillis: 5000, // Increased from 2s to 5s
+      keepAlive: true, // Keep connections alive
+      keepAliveInitialDelayMillis: 10000,
+    });
+    
+    // Add error handling for the pool
+    pool.on('error', (err) => {
+      console.error('Database pool error:', err);
+    });
+    
+    pool.on('connect', () => {
+      console.log('Database connection established');
     });
   }
   return pool;
