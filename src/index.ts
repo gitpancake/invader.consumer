@@ -24,8 +24,8 @@ const s3 = new S3Client({ region: REGION });
 const BASE_URL = "https://api.space-invaders.com";
 
 // Rate limiter for IPFS uploads (Picnic plan: 250 requests/minute)
-// Conservative: 4 requests/second, max 240/minute (leaving 10 request buffer)
-const ipfsRateLimiter = new RateLimiter(4, 240);
+// Target: ~200 uploads/minute = 3.33 requests/second, max 200/minute (safe buffer)
+const ipfsRateLimiter = new RateLimiter(3.5, 200);
 
 // Common user agents to rotate through for obfuscation
 const USER_AGENTS = [
