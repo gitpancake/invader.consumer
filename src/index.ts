@@ -15,8 +15,9 @@ const BUCKET_NAME = process.env.BUCKET_NAME;
 const s3 = new S3Client({ region: REGION });
 const BASE_URL = "https://api.space-invaders.com";
 
-// Rate limiter for IPFS uploads (1 per 2 seconds, max 20 per minute)
-const ipfsRateLimiter = new RateLimiter(0.5, 20);
+// Rate limiter for IPFS uploads (Picnic plan: 250 requests/minute)
+// Conservative: 4 requests/second, max 240/minute (leaving 10 request buffer)
+const ipfsRateLimiter = new RateLimiter(4, 240);
 
 // Common user agents to rotate through for obfuscation
 const USER_AGENTS = [
@@ -236,8 +237,8 @@ class FlashConsumer extends RabbitMQBaseConsumer {
         throw new Error('Both S3 and IPFS uploads failed');
       }
 
-      // Add processing delay (500 images / 10 minutes = 1 per 1.2 seconds)
-      await sleep(1200);
+      // Add small processing delay to be gentle on the system
+      await sleep(300);
     } catch (err) {
       console.error("[FlashConsumer] Error downloading/uploading image:", err);
 
