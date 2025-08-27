@@ -3,11 +3,11 @@ import { ConsumeMessage } from "amqplib";
 import axios from "axios";
 import { config } from "dotenv";
 import { Flash } from "./types/Flash";
+import { BatchUpdater } from "./util/batch-updater";
+import { CSVLogger, IPFSRecord } from "./util/csv-logger";
+import { getPool } from "./util/database";
 import { RabbitMQBaseConsumer } from "./util/rabbitmq";
 import { RateLimiter } from "./util/rate-limiter";
-import { getPool } from "./util/database";
-import { CSVLogger, IPFSRecord } from "./util/csv-logger";
-import { BatchUpdater } from "./util/batch-updater";
 
 config({
   path: ".env",
@@ -25,8 +25,8 @@ const s3 = new S3Client({ region: REGION });
 const BASE_URL = "https://api.space-invaders.com";
 
 // Rate limiter for IPFS uploads (Picnic plan: 250 requests/minute)
-// Target: ~50 uploads/minute = 0.83 requests/second, max 50/minute (conservative buffer)
-const ipfsRateLimiter = new RateLimiter(0.83, 50);
+// Target: 0.5 second delay = 2 requests/second = 120/minute (conservative buffer for 250/minute limit)
+const ipfsRateLimiter = new RateLimiter(2, 120);
 
 // Common user agents to rotate through for obfuscation
 const USER_AGENTS = [
@@ -128,7 +128,7 @@ async function retryRequest<T>(requestFn: () => Promise<T>, maxRetries: number =
 class FlashConsumer extends RabbitMQBaseConsumer {
   private dbPool: any;
   public batchUpdater: BatchUpdater; // Make public for shutdown access
-  
+
   constructor() {
     super();
     // Initialize database connection pool early
@@ -166,7 +166,7 @@ class FlashConsumer extends RabbitMQBaseConsumer {
       const contentLength = response.headers["content-length"];
       const fileSize = parseInt(contentLength || "0", 10) || response.data.byteLength;
 
-      const filename = originalKey.split('/').pop() || `image_${flash.flash_id}.jpg`;
+      const filename = originalKey.split("/").pop() || `image_${flash.flash_id}.jpg`;
       let s3Success = false;
       let ipfsSuccess = false;
       let cid = null;
@@ -197,24 +197,24 @@ class FlashConsumer extends RabbitMQBaseConsumer {
       try {
         // Apply rate limiting for IPFS uploads
         await ipfsRateLimiter.waitIfNeeded();
-        
+
         const file = new File([response.data], filename, { type: contentType });
         const formData = new FormData();
-        formData.append('file', file);
-        formData.append('pinataMetadata', JSON.stringify({ name: filename }));
+        formData.append("file", file);
+        formData.append("pinataMetadata", JSON.stringify({ name: filename }));
 
-        const pinataResponse = await axios.post('https://api.pinata.cloud/pinning/pinFileToIPFS', formData, {
+        const pinataResponse = await axios.post("https://api.pinata.cloud/pinning/pinFileToIPFS", formData, {
           headers: {
-            'Authorization': `Bearer ${PINATA_JWT}`,
-            'Content-Type': 'multipart/form-data'
+            Authorization: `Bearer ${PINATA_JWT}`,
+            "Content-Type": "multipart/form-data",
           },
-          timeout: 60000
+          timeout: 60000,
         });
 
         cid = pinataResponse.data.IpfsHash;
         ipfsSuccess = true;
       } catch (ipfsError) {
-        const errorMsg = ipfsError instanceof Error ? ipfsError.message : 'Unknown error';
+        const errorMsg = ipfsError instanceof Error ? ipfsError.message : "Unknown error";
         if (axios.isAxiosError(ipfsError) && ipfsError.response?.status === 429) {
           console.error(`[FlashConsumer] ⏱️  IPFS rate limited (429), will retry later`);
         } else {
@@ -239,7 +239,7 @@ class FlashConsumer extends RabbitMQBaseConsumer {
       } else if (ipfsSuccess) {
         console.log(`Dual upload failed for flash_id: ${flash.flash_id}, reason: S3 failed`);
       } else {
-        throw new Error('Both S3 and IPFS uploads failed');
+        throw new Error("Both S3 and IPFS uploads failed");
       }
 
       // Log to CSV for Web3.Storage import later (only if IPFS successful)
@@ -252,16 +252,16 @@ class FlashConsumer extends RabbitMQBaseConsumer {
           file_size: fileSize,
           content_type: contentType,
           uploaded_at: new Date().toISOString(),
-          source: 'API' // Consumer always downloads from API
+          source: "API", // Consumer always downloads from API
         };
-        
+
         CSVLogger.logIPFSUpload(csvRecord);
       }
 
       // Add small processing delay to be gentle on the system
       await sleep(300);
     } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+      const errorMsg = err instanceof Error ? err.message : "Unknown error";
       console.log(`Dual upload failed for flash_id: ${flash.flash_id}, reason: ${errorMsg}`);
       throw err;
     }
@@ -271,31 +271,31 @@ class FlashConsumer extends RabbitMQBaseConsumer {
 (async () => {
   const consumer = new FlashConsumer();
   const testMode = process.env.TEST_MODE === "true";
-  
+
   // Graceful shutdown handler
   const shutdown = async (signal: string) => {
     console.log(`\n[FlashConsumer] Received ${signal}, shutting down gracefully...`);
-    
+
     try {
       // Force flush any remaining batch updates
       await consumer.batchUpdater.shutdown();
       console.log(`[FlashConsumer] Batch updater shutdown complete`);
-      
+
       // Close database connections
-      const { closePool } = await import('./util/database');
+      const { closePool } = await import("./util/database");
       await closePool();
       console.log(`[FlashConsumer] Database connections closed`);
-      
+
       process.exit(0);
     } catch (error) {
       console.error(`[FlashConsumer] Error during shutdown:`, error);
       process.exit(1);
     }
   };
-  
+
   // Register shutdown handlers
-  process.on('SIGINT', () => shutdown('SIGINT'));
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+
   await consumer.startConsuming(testMode);
 })();
