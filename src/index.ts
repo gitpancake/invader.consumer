@@ -4,6 +4,7 @@ import axios from "axios";
 import { config } from "dotenv";
 import { Flash } from "./types/Flash";
 import { RabbitMQBaseConsumer } from "./util/rabbitmq";
+import { RateLimiter } from "./util/rate-limiter";
 
 config({
   path: ".env",
@@ -13,6 +14,9 @@ const REGION = process.env.AWS_REGION;
 const BUCKET_NAME = process.env.BUCKET_NAME;
 const s3 = new S3Client({ region: REGION });
 const BASE_URL = "https://api.space-invaders.com";
+
+// Rate limiter for IPFS uploads (1 per 2 seconds, max 20 per minute)
+const ipfsRateLimiter = new RateLimiter(0.5, 20);
 
 // Common user agents to rotate through for obfuscation
 const USER_AGENTS = [
@@ -144,27 +148,96 @@ class FlashConsumer extends RabbitMQBaseConsumer {
       const contentType = response.headers["content-type"] || "image/jpeg";
       const contentLength = response.headers["content-length"];
 
-      console.log(`[FlashConsumer] Successfully downloaded image (${contentLength || "unknown"} bytes, ${contentType})`);
+      const fileSize = parseInt(contentLength || "0", 10) || response.data.byteLength;
+      console.log(`[FlashConsumer] Successfully downloaded image (${fileSize} bytes, ${contentType})`);
 
-      await s3.send(
-        new PutObjectCommand({
-          Bucket: BUCKET_NAME,
-          Key: s3Key,
-          Body: response.data,
-          ContentType: contentType,
-          ACL: "public-read",
-          Metadata: {
-            "original-url": imageUrl,
-            "downloaded-at": new Date().toISOString(),
-            "user-agent": String(response.config.headers?.["User-Agent"] || "unknown"),
+      const filename = s3Key.split('/').pop() || `image_${flash.flash_id}.jpg`;
+      let s3Success = false;
+      let ipfsSuccess = false;
+      let cid = null;
+
+      // 1. Upload to S3 (existing functionality)
+      try {
+        await s3.send(
+          new PutObjectCommand({
+            Bucket: BUCKET_NAME,
+            Key: s3Key,
+            Body: response.data,
+            ContentType: contentType,
+            ACL: "public-read",
+            Metadata: {
+              "original-url": imageUrl,
+              "downloaded-at": new Date().toISOString(),
+              "user-agent": String(response.config.headers?.["User-Agent"] || "unknown"),
+            },
+          })
+        );
+
+        console.log(`[FlashConsumer] ✅ S3: https://${BUCKET_NAME}.s3.amazonaws.com/${s3Key}`);
+        s3Success = true;
+      } catch (s3Error) {
+        console.error(`[FlashConsumer] ❌ S3 upload failed:`, s3Error instanceof Error ? s3Error.message : s3Error);
+      }
+
+      // 2. Upload to IPFS via Pinata (with rate limiting)
+      try {
+        // Apply rate limiting for IPFS uploads
+        await ipfsRateLimiter.waitIfNeeded();
+        
+        console.log(`[FlashConsumer] 🌐 Uploading to IPFS...`);
+        const file = new File([response.data], filename, { type: contentType });
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('pinataMetadata', JSON.stringify({ name: filename }));
+
+        const pinataResponse = await axios.post('https://api.pinata.cloud/pinning/pinFileToIPFS', formData, {
+          headers: {
+            'Authorization': `Bearer ${process.env.PINATA_JWT}`,
+            'Content-Type': 'multipart/form-data'
           },
-        })
-      );
+          timeout: 60000
+        });
 
-      // console.log(`[FlashConsumer] Uploaded image to S3: https://${BUCKET_NAME}.s3.${REGION}.amazonaws.com/${s3Key}`);
+        cid = pinataResponse.data.IpfsHash;
+        console.log(`[FlashConsumer] ✅ IPFS: ipfs://${cid}`);
+        ipfsSuccess = true;
+      } catch (ipfsError) {
+        const errorMsg = ipfsError instanceof Error ? ipfsError.message : 'Unknown error';
+        if (axios.isAxiosError(ipfsError) && ipfsError.response?.status === 429) {
+          console.error(`[FlashConsumer] ⏱️  IPFS rate limited (429), will retry later`);
+        } else {
+          console.error(`[FlashConsumer] ❌ IPFS upload failed: ${errorMsg}`);
+        }
+      }
 
-      // Add a small delay after successful processing to avoid overwhelming the server
-      await sleep(Math.random() * 2000 + 500);
+      // 3. Update database with IPFS CID if successful
+      if (ipfsSuccess && cid) {
+        try {
+          const pool = require('./util/database').getPool();
+          await pool.query(
+            `UPDATE flashes 
+             SET ipfs_cid = $1 
+             WHERE flash_id = $2`,
+            [cid, flash.flash_id]
+          );
+        } catch (dbError) {
+          console.error(`[FlashConsumer] ❌ Database update failed:`, dbError);
+        }
+      }
+
+      // 4. Report status
+      if (s3Success && ipfsSuccess) {
+        console.log(`[FlashConsumer] ✅ Dual upload complete for flash_id: ${flash.flash_id}`);
+      } else if (s3Success) {
+        console.log(`[FlashConsumer] ⚠️  S3 only for flash_id: ${flash.flash_id} (IPFS failed)`);
+      } else if (ipfsSuccess) {
+        console.log(`[FlashConsumer] ⚠️  IPFS only for flash_id: ${flash.flash_id} (S3 failed)`);
+      } else {
+        throw new Error('Both S3 and IPFS uploads failed');
+      }
+
+      // Add processing delay (500 images / 10 minutes = 1 per 1.2 seconds)
+      await sleep(1200);
     } catch (err) {
       console.error("[FlashConsumer] Error downloading/uploading image:", err);
 
