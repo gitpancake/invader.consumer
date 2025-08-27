@@ -5,11 +5,19 @@ import { config } from "dotenv";
 import { Flash } from "./types/Flash";
 import { RabbitMQBaseConsumer } from "./util/rabbitmq";
 import { RateLimiter } from "./util/rate-limiter";
+import { getPool } from "./util/database";
+import { CSVLogger, IPFSRecord } from "./util/csv-logger";
 
 config({
   path: ".env",
 });
 
+const PINATA_JWT = process.env.PINATA_JWT;
+if (!PINATA_JWT) {
+  throw new Error("PINATA_JWT environment variable is required");
+}
+
+// AWS S3 configuration (for dual storage)
 const REGION = process.env.AWS_REGION;
 const BUCKET_NAME = process.env.BUCKET_NAME;
 const s3 = new S3Client({ region: REGION });
@@ -125,7 +133,7 @@ class FlashConsumer extends RabbitMQBaseConsumer {
     const content = msg.content.toString();
     const flash: Flash = JSON.parse(content);
     const imageUrl = BASE_URL + flash.img;
-    const s3Key = flash.img.replace(/^\//, "");
+    const originalKey = flash.img.replace(/^\//, "");
 
     try {
       // Add human-like delay before making the request
@@ -148,11 +156,10 @@ class FlashConsumer extends RabbitMQBaseConsumer {
 
       const contentType = response.headers["content-type"] || "image/jpeg";
       const contentLength = response.headers["content-length"];
-
       const fileSize = parseInt(contentLength || "0", 10) || response.data.byteLength;
       console.log(`[FlashConsumer] Successfully downloaded image (${fileSize} bytes, ${contentType})`);
 
-      const filename = s3Key.split('/').pop() || `image_${flash.flash_id}.jpg`;
+      const filename = originalKey.split('/').pop() || `image_${flash.flash_id}.jpg`;
       let s3Success = false;
       let ipfsSuccess = false;
       let cid = null;
@@ -162,7 +169,7 @@ class FlashConsumer extends RabbitMQBaseConsumer {
         await s3.send(
           new PutObjectCommand({
             Bucket: BUCKET_NAME,
-            Key: s3Key,
+            Key: originalKey,
             Body: response.data,
             ContentType: contentType,
             ACL: "public-read",
@@ -174,7 +181,7 @@ class FlashConsumer extends RabbitMQBaseConsumer {
           })
         );
 
-        console.log(`[FlashConsumer] ✅ S3: https://${BUCKET_NAME}.s3.amazonaws.com/${s3Key}`);
+        console.log(`[FlashConsumer] ✅ S3: https://${BUCKET_NAME}.s3.amazonaws.com/${originalKey}`);
         s3Success = true;
       } catch (s3Error) {
         console.error(`[FlashConsumer] ❌ S3 upload failed:`, s3Error instanceof Error ? s3Error.message : s3Error);
@@ -193,14 +200,16 @@ class FlashConsumer extends RabbitMQBaseConsumer {
 
         const pinataResponse = await axios.post('https://api.pinata.cloud/pinning/pinFileToIPFS', formData, {
           headers: {
-            'Authorization': `Bearer ${process.env.PINATA_JWT}`,
+            'Authorization': `Bearer ${PINATA_JWT}`,
             'Content-Type': 'multipart/form-data'
           },
           timeout: 60000
         });
 
         cid = pinataResponse.data.IpfsHash;
-        console.log(`[FlashConsumer] ✅ IPFS: ipfs://${cid}`);
+        const ipfsUrl = `ipfs://${cid}`;
+        
+        console.log(`[FlashConsumer] ✅ IPFS: ${ipfsUrl}`);
         ipfsSuccess = true;
       } catch (ipfsError) {
         const errorMsg = ipfsError instanceof Error ? ipfsError.message : 'Unknown error';
@@ -214,7 +223,7 @@ class FlashConsumer extends RabbitMQBaseConsumer {
       // 3. Update database with IPFS CID if successful
       if (ipfsSuccess && cid) {
         try {
-          const pool = require('./util/database').getPool();
+          const pool = getPool();
           await pool.query(
             `UPDATE flashes 
              SET ipfs_cid = $1 
@@ -237,6 +246,22 @@ class FlashConsumer extends RabbitMQBaseConsumer {
         throw new Error('Both S3 and IPFS uploads failed');
       }
 
+      // Log to CSV for Web3.Storage import later (only if IPFS successful)
+      if (ipfsSuccess && cid) {
+        const csvRecord: IPFSRecord = {
+          flash_id: flash.flash_id,
+          cid,
+          filename,
+          ipfs_url: `ipfs://${cid}`,
+          file_size: fileSize,
+          content_type: contentType,
+          uploaded_at: new Date().toISOString(),
+          source: 'API' // Consumer always downloads from API
+        };
+        
+        CSVLogger.logIPFSUpload(csvRecord);
+      }
+
       // Add small processing delay to be gentle on the system
       await sleep(300);
     } catch (err) {
@@ -256,5 +281,6 @@ class FlashConsumer extends RabbitMQBaseConsumer {
 
 (async () => {
   const consumer = new FlashConsumer();
-  await consumer.startConsuming();
+  const testMode = process.env.TEST_MODE === "true";
+  await consumer.startConsuming(testMode);
 })();
