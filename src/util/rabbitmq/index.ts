@@ -17,21 +17,38 @@ export abstract class RabbitMQBaseConsumer {
 
   protected abstract handleMessage(msg: ConsumeMessage): Promise<void>;
 
-  public async startConsuming() {
+  public async startConsuming(testMode: boolean = false) {
     const connection = await connect(this.rabbitUrl);
     const channel = await connection.createChannel();
     await channel.assertQueue(this.queue, { durable: true });
-    console.log(`[RabbitMQBaseConsumer] Waiting for messages in ${this.queue}. To exit press CTRL+C`);
+    
+    if (testMode) {
+      console.log(`[RabbitMQBaseConsumer] Running in TEST MODE - messages will NOT be removed from queue`);
+    } else {
+      console.log(`[RabbitMQBaseConsumer] Waiting for messages in ${this.queue}. To exit press CTRL+C`);
+    }
+    
     channel.consume(
       this.queue,
       async (msg) => {
         if (msg) {
           try {
             await this.handleMessage(msg);
-            channel.ack(msg);
+            if (!testMode) {
+              channel.ack(msg);
+            } else {
+              // In test mode, reject message and requeue it
+              channel.nack(msg, false, true);
+              console.log(`[RabbitMQBaseConsumer] TEST MODE: Message requeued`);
+            }
           } catch (err) {
             console.error("[RabbitMQBaseConsumer] Error processing message:", err);
-            channel.nack(msg, false, false);
+            if (!testMode) {
+              channel.nack(msg, false, false);
+            } else {
+              // In test mode, still requeue even on error
+              channel.nack(msg, false, true);
+            }
           }
         }
       },

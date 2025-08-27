@@ -9,9 +9,11 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.839.0",
+    "@types/pg": "^8.15.5",
     "amqplib": "^0.10.8",
     "axios": "^1.10.0",
-    "dotenv": "^17.0.0"
+    "dotenv": "^17.0.0",
+    "pg": "^8.16.3"
   },
   "engines": {
     "node": ">=19.9.0"
@@ -19,6 +21,11 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "tsc --watch & nodemon dist/index.js"
+    "dev": "tsc --watch & nodemon dist/index.js",
+    "test": "TEST_MODE=true node dist/index.js",
+    "migrate": "tsc && node dist/scripts/migrate-s3-to-ipfs.js",
+    "migrate:batch": "tsc && node dist/scripts/migrate-s3-to-ipfs.js",
+    "test-upload": "tsc && node dist/scripts/test-dual-upload.js",
+    "generate-web3-csv": "node -e \"const {CSVLogger} = require('./dist/util/csv-logger'); console.log('Generated:', CSVLogger.generateWeb3StorageCSV());\""
   }
 }

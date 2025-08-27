@@ -2,13 +2,22 @@ import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { ConsumeMessage } from "amqplib";
 import axios from "axios";
 import { config } from "dotenv";
+// Using Pinata HTTP API directly (no SDK needed)
 import { Flash } from "./types/Flash";
 import { RabbitMQBaseConsumer } from "./util/rabbitmq";
+import { getPool } from "./util/database";
+import { CSVLogger, IPFSRecord } from "./util/csv-logger";
 
 config({
   path: ".env",
 });
 
+const PINATA_JWT = process.env.PINATA_JWT;
+if (!PINATA_JWT) {
+  throw new Error("PINATA_JWT environment variable is required");
+}
+
+// AWS S3 configuration (for dual storage)
 const REGION = process.env.AWS_REGION;
 const BUCKET_NAME = process.env.BUCKET_NAME;
 const s3 = new S3Client({ region: REGION });
@@ -120,7 +129,7 @@ class FlashConsumer extends RabbitMQBaseConsumer {
     const content = msg.content.toString();
     const flash: Flash = JSON.parse(content);
     const imageUrl = BASE_URL + flash.img;
-    const s3Key = flash.img.replace(/^\//, "");
+    const originalKey = flash.img.replace(/^\//, "");
 
     try {
       // Add human-like delay before making the request
@@ -143,27 +152,102 @@ class FlashConsumer extends RabbitMQBaseConsumer {
 
       const contentType = response.headers["content-type"] || "image/jpeg";
       const contentLength = response.headers["content-length"];
+      const fileSize = parseInt(contentLength || "0", 10) || response.data.byteLength;
 
-      console.log(`[FlashConsumer] Successfully downloaded image (${contentLength || "unknown"} bytes, ${contentType})`);
+      console.log(`[FlashConsumer] Successfully downloaded image (${fileSize} bytes, ${contentType})`);
 
-      await s3.send(
-        new PutObjectCommand({
-          Bucket: BUCKET_NAME,
-          Key: s3Key,
-          Body: response.data,
-          ContentType: contentType,
-          ACL: "public-read",
-          Metadata: {
-            "original-url": imageUrl,
-            "downloaded-at": new Date().toISOString(),
-            "user-agent": String(response.config.headers?.["User-Agent"] || "unknown"),
+      const filename = originalKey.split('/').pop() || `image_${flash.flash_id}.jpg`;
+
+      let s3Success = false;
+      let ipfsSuccess = false;
+      let cid = null;
+
+      // 1. Upload to S3 (existing functionality)
+      try {
+        await s3.send(
+          new PutObjectCommand({
+            Bucket: BUCKET_NAME,
+            Key: originalKey,
+            Body: response.data,
+            ContentType: contentType,
+            ACL: "public-read",
+            Metadata: {
+              "original-url": imageUrl,
+              "downloaded-at": new Date().toISOString(),
+              "user-agent": String(response.config.headers?.["User-Agent"] || "unknown"),
+            },
+          })
+        );
+
+        console.log(`[FlashConsumer] ✅ S3: https://${BUCKET_NAME}.s3.amazonaws.com/${originalKey}`);
+        s3Success = true;
+      } catch (s3Error) {
+        console.error(`[FlashConsumer] ❌ S3 upload failed:`, s3Error instanceof Error ? s3Error.message : s3Error);
+      }
+
+      // 2. Upload to IPFS via Pinata
+      try {
+        const file = new File([response.data], filename, { type: contentType });
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('pinataMetadata', JSON.stringify({ name: filename }));
+
+        const pinataResponse = await axios.post('https://api.pinata.cloud/pinning/pinFileToIPFS', formData, {
+          headers: {
+            'Authorization': `Bearer ${PINATA_JWT}`,
+            'Content-Type': 'multipart/form-data'
           },
-        })
-      );
+          timeout: 60000
+        });
 
-      // console.log(`[FlashConsumer] Uploaded image to S3: https://${BUCKET_NAME}.s3.${REGION}.amazonaws.com/${s3Key}`);
+        cid = pinataResponse.data.IpfsHash;
+        const ipfsUrl = `ipfs://${cid}`;
+        
+        console.log(`[FlashConsumer] ✅ IPFS: ${ipfsUrl}`);
+        ipfsSuccess = true;
+      } catch (ipfsError) {
+        console.error(`[FlashConsumer] ❌ IPFS upload failed:`, ipfsError instanceof Error ? ipfsError.message : ipfsError);
+      }
 
-      // Add a small delay after successful processing to avoid overwhelming the server
+      // 3. Update database with IPFS CID if successful
+      if (ipfsSuccess && cid) {
+        const pool = getPool();
+        await pool.query(
+          `UPDATE flashes 
+           SET ipfs_cid = $1 
+           WHERE flash_id = $2`,
+          [cid, flash.flash_id]
+        );
+      }
+
+      // 4. Report status
+      if (s3Success && ipfsSuccess) {
+        console.log(`[FlashConsumer] ✅ Dual upload complete for flash_id: ${flash.flash_id}`);
+      } else if (s3Success) {
+        console.log(`[FlashConsumer] ⚠️  S3 only for flash_id: ${flash.flash_id} (IPFS failed)`);
+      } else if (ipfsSuccess) {
+        console.log(`[FlashConsumer] ⚠️  IPFS only for flash_id: ${flash.flash_id} (S3 failed)`);
+      } else {
+        throw new Error('Both S3 and IPFS uploads failed');
+      }
+
+      // Log to CSV for Web3.Storage import later (only if IPFS successful)
+      if (ipfsSuccess && cid) {
+        const csvRecord: IPFSRecord = {
+          flash_id: flash.flash_id,
+          cid,
+          filename,
+          ipfs_url: `ipfs://${cid}`,
+          file_size: fileSize,
+          content_type: contentType,
+          uploaded_at: new Date().toISOString(),
+          source: 'API' // Consumer always downloads from API
+        };
+        
+        CSVLogger.logIPFSUpload(csvRecord);
+      }
+
+      // Add a small delay after successful processing
       await sleep(Math.random() * 2000 + 500);
     } catch (err) {
       console.error("[FlashConsumer] Error downloading/uploading image:", err);
@@ -182,5 +266,6 @@ class FlashConsumer extends RabbitMQBaseConsumer {
 
 (async () => {
   const consumer = new FlashConsumer();
-  await consumer.startConsuming();
+  const testMode = process.env.TEST_MODE === "true";
+  await consumer.startConsuming(testMode);
 })();

@@ -1,0 +1,226 @@
+import { S3Client, GetObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
+import { config } from "dotenv";
+// Using Pinata HTTP API directly
+import axios from "axios";
+import { getPool, closePool } from "../util/database";
+import { CSVLogger, IPFSRecord } from "../util/csv-logger";
+
+config({ path: ".env" });
+
+// AWS S3 configuration
+const REGION = process.env.AWS_REGION;
+const BUCKET_NAME = process.env.BUCKET_NAME;
+const s3 = new S3Client({ region: REGION });
+
+// Pinata configuration
+const PINATA_JWT = process.env.PINATA_JWT;
+if (!PINATA_JWT) {
+  throw new Error("PINATA_JWT environment variable is required");
+}
+
+interface FlashRecord {
+  flash_id: number;
+  img: string;
+}
+
+interface MigrationStats {
+  total: number;
+  migrated: number;
+  skipped: number;
+  failed: number;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function getFlashesToMigrate(limit: number = 100): Promise<FlashRecord[]> {
+  const pool = getPool();
+  
+  // Get total count
+  const countResult = await pool.query(`
+    SELECT COUNT(*) as count
+    FROM flashes 
+    WHERE ipfs_cid IS NULL
+    AND img IS NOT NULL
+    AND img != ''
+  `);
+  
+  const result = await pool.query(`
+    SELECT flash_id, img 
+    FROM flashes 
+    WHERE ipfs_cid IS NULL
+    AND img IS NOT NULL
+    AND img != ''
+    ORDER BY flash_id ASC
+    LIMIT $1
+  `, [limit]);
+  
+  
+  return result.rows;
+}
+
+async function migrateImageToIPFS(flash: FlashRecord): Promise<boolean> {
+  try {
+    const s3Key = flash.img.replace(/^\//, "");
+    const s3Url = `https://invader-flashes.s3.amazonaws.com/${s3Key}`;
+    
+    console.log(`[Migration] Processing flash_id: ${flash.flash_id}, downloading from: ${s3Url}`);
+    
+    // Try downloading from S3 first, fallback to API if not found
+    let response;
+    let source = "S3";
+    
+    try {
+      response = await axios.get(s3Url, {
+        responseType: "arraybuffer",
+        timeout: 30000,
+        validateStatus: (status) => status < 400,
+      });
+      console.log(`[Migration] Downloaded from S3: ${s3Url}`);
+    } catch (s3Error) {
+      // If S3 fails, try the original API
+      const apiUrl = `https://api.space-invaders.com${flash.img}`;
+      console.log(`[Migration] S3 failed, trying API: ${apiUrl}`);
+      source = "API";
+      
+      response = await axios.get(apiUrl, {
+        responseType: "arraybuffer",
+        timeout: 30000,
+        validateStatus: (status) => status < 400,
+      });
+      console.log(`[Migration] Downloaded from API: ${apiUrl}`);
+    }
+    
+    const contentType = response.headers["content-type"] || "image/jpeg";
+    const contentLength = response.headers["content-length"];
+    const fileSize = parseInt(contentLength || "0", 10) || response.data.byteLength;
+    
+    // Create File for upload
+    const filename = s3Key.split('/').pop() || `image_${flash.flash_id}.jpg`;
+    const file = new File([response.data], filename, { type: contentType });
+    
+    // Upload to IPFS via Pinata
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('pinataMetadata', JSON.stringify({ name: filename }));
+
+    const pinataResponse = await axios.post('https://api.pinata.cloud/pinning/pinFileToIPFS', formData, {
+      headers: {
+        'Authorization': `Bearer ${PINATA_JWT}`,
+        'Content-Type': 'multipart/form-data'
+      },
+      timeout: 60000
+    });
+
+    const cid = pinataResponse.data.IpfsHash;
+    const ipfsUrl = `ipfs://${cid}`;
+    
+    // Update flashes table with IPFS CID (safe UPDATE operation)
+    const pool = getPool();
+    const result = await pool.query(
+      `UPDATE flashes 
+       SET ipfs_cid = $1 
+       WHERE flash_id = $2 
+       AND ipfs_cid IS NULL`,  // Only update if not already set (extra safety)
+      [cid, flash.flash_id]
+    );
+    
+    if (result.rowCount === 0) {
+      return false;
+    }
+    
+    console.log(`${flash.flash_id}: ${cid}`);
+
+    // Log to CSV for Web3.Storage import later
+    const csvRecord: IPFSRecord = {
+      flash_id: flash.flash_id,
+      cid,
+      filename,
+      ipfs_url: ipfsUrl,
+      file_size: fileSize,
+      content_type: contentType,
+      uploaded_at: new Date().toISOString(),
+      source: source as 'S3' | 'API'
+    };
+    
+    CSVLogger.logIPFSUpload(csvRecord);
+    
+    // Small delay to avoid overwhelming services
+    await sleep(1000);
+    
+    return true;
+    
+  } catch (error) {
+    console.error(`❌ ${flash.flash_id}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    return false;
+  }
+}
+
+async function runMigration(batchSize: number = 50, maxBatches: number = -1) {
+  console.log(`Starting migration: ${batchSize} per batch, ${maxBatches === -1 ? 'unlimited' : maxBatches} batches max`);
+  
+  const stats: MigrationStats = {
+    total: 0,
+    migrated: 0,
+    skipped: 0,
+    failed: 0
+  };
+  
+  let batchCount = 0;
+  
+  while (maxBatches === -1 || batchCount < maxBatches) {
+    const flashesToMigrate = await getFlashesToMigrate(batchSize);
+    
+    if (flashesToMigrate.length === 0) {
+      break;
+    }
+    
+    for (const flash of flashesToMigrate) {
+      stats.total++;
+      
+      const success = await migrateImageToIPFS(flash);
+      
+      if (success) {
+        stats.migrated++;
+      } else {
+        stats.failed++;
+      }
+    }
+    
+    batchCount++;
+    
+    // Delay between batches to avoid rate limiting
+    if (maxBatches === -1 || batchCount < maxBatches) {
+      await sleep(2000);
+    }
+  }
+  
+  console.log(`\n=== MIGRATION COMPLETE ===`);
+  console.log(`Total processed: ${stats.total}`);
+  console.log(`Successfully migrated: ${stats.migrated}`);
+  console.log(`Failed: ${stats.failed}`);
+  console.log(`Success rate: ${stats.total > 0 ? ((stats.migrated / stats.total) * 100).toFixed(1) : 0}%`);
+}
+
+// CLI interface
+const args = process.argv.slice(2);
+const batchSize = args[0] ? parseInt(args[0]) : 50;
+const maxBatches = args[1] ? parseInt(args[1]) : -1;
+
+if (require.main === module) {
+  runMigration(batchSize, maxBatches)
+    .then(() => {
+      console.log(`Migration completed successfully`);
+      return closePool();
+    })
+    .then(() => {
+      process.exit(0);
+    })
+    .catch((error) => {
+      console.error(`Migration failed:`, error);
+      closePool().finally(() => process.exit(1));
+    });
+}
+
+export { runMigration };
