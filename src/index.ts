@@ -24,8 +24,8 @@ const BUCKET_NAME = process.env.BUCKET_NAME;
 const s3 = new S3Client({ region: REGION });
 const BASE_URL = "https://api.space-invaders.com";
 
-// Rate limiter for IPFS uploads - simple 0.5 second delay between calls
-const ipfsRateLimiter = new RateLimiter(500);
+// Rate limiter for IPFS uploads - increased delay during migration period
+const ipfsRateLimiter = new RateLimiter(2000); // 2 second delay between calls during migration
 
 // Common user agents to rotate through for obfuscation
 const USER_AGENTS = [
@@ -192,29 +192,46 @@ class FlashConsumer extends RabbitMQBaseConsumer {
         console.error(`[FlashConsumer] ❌ S3 upload failed:`, s3Error instanceof Error ? s3Error.message : s3Error);
       }
 
-      // 2. Upload to IPFS via Pinata (with rate limiting)
+      // 2. Upload to IPFS via Pinata (with rate limiting and retry)
       try {
-        // Apply rate limiting for IPFS uploads
-        await ipfsRateLimiter.waitIfNeeded();
+        const uploadToIPFS = async (): Promise<string> => {
+          // Apply rate limiting for IPFS uploads
+          await ipfsRateLimiter.waitIfNeeded();
 
-        const file = new File([response.data], filename, { type: contentType });
-        const formData = new FormData();
-        formData.append("file", file);
-        formData.append("pinataMetadata", JSON.stringify({ name: filename }));
+          const file = new File([response.data], filename, { type: contentType });
+          const formData = new FormData();
+          formData.append("file", file);
+          formData.append("pinataMetadata", JSON.stringify({ name: filename }));
 
-        const pinataResponse = await axios.post("https://api.pinata.cloud/pinning/pinFileToIPFS", formData, {
-          headers: {
-            Authorization: `Bearer ${PINATA_JWT}`,
-            "Content-Type": "multipart/form-data",
-          },
-          timeout: 60000,
-        });
+          const pinataResponse = await axios.post("https://api.pinata.cloud/pinning/pinFileToIPFS", formData, {
+            headers: {
+              Authorization: `Bearer ${PINATA_JWT}`,
+              "Content-Type": "multipart/form-data",
+            },
+            timeout: 60000,
+            validateStatus: (status) => status < 500, // Retry on 5xx errors
+          });
 
-        cid = pinataResponse.data.IpfsHash;
+          // Handle rate limiting with longer wait
+          if (pinataResponse.status === 429) {
+            const retryAfter = pinataResponse.headers['retry-after'] || '60';
+            const waitTime = parseInt(retryAfter) * 1000;
+            throw new Error(`Rate limited by Pinata API - suggested wait: ${waitTime}ms`);
+          }
+
+          if (pinataResponse.status >= 400) {
+            throw new Error(`Pinata API error: ${pinataResponse.status} ${pinataResponse.statusText}`);
+          }
+
+          return pinataResponse.data.IpfsHash;
+        };
+
+        // Retry IPFS upload with longer backoff during migration period
+        cid = await retryRequest(uploadToIPFS, 5, 10000); // 5 retries, 10 second base delay for migration period
         ipfsSuccess = true;
       } catch (ipfsError) {
         const errorMsg = ipfsError instanceof Error ? ipfsError.message : "Unknown error";
-        console.error(`[FlashConsumer] ❌ IPFS upload failed: ${errorMsg}`);
+        console.error(`[FlashConsumer] ❌ IPFS upload failed after retries: ${errorMsg}`);
       }
 
       // 3. Add to batch updater if IPFS was successful
