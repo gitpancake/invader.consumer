@@ -24,8 +24,8 @@ const BUCKET_NAME = process.env.BUCKET_NAME;
 const s3 = new S3Client({ region: REGION });
 const BASE_URL = "https://api.space-invaders.com";
 
-// Rate limiter for IPFS uploads - increased delay during migration period
-const ipfsRateLimiter = new RateLimiter(2000); // 2 second delay between calls during migration
+// Rate limiter for IPFS uploads - 50 req/min total during migration period
+const ipfsRateLimiter = new RateLimiter(1200); // 1.2 seconds = 50 req/min
 
 // Common user agents to rotate through for obfuscation
 const USER_AGENTS = [

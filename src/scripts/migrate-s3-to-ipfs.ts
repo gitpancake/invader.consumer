@@ -171,8 +171,8 @@ async function migrateImageToIPFS(flash: FlashRecord, retryCount = 0): Promise<b
     
     CSVLogger.logIPFSUpload(csvRecord);
     
-    // Small delay to avoid overwhelming services - optimized for Pinata Picnic plan (250 req/min)
-    await sleep(250);
+    // Delay to stay under Pinata rate limit: 200 req/min total ÷ 6 workers = ~33 req/min per worker
+    await sleep(1800); // 1.8 seconds = ~33 req/min per worker
     
     return true;
     
