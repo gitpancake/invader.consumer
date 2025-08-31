@@ -214,11 +214,7 @@ class FlashConsumer extends RabbitMQBaseConsumer {
         ipfsSuccess = true;
       } catch (ipfsError) {
         const errorMsg = ipfsError instanceof Error ? ipfsError.message : "Unknown error";
-        if (axios.isAxiosError(ipfsError) && ipfsError.response?.status === 429) {
-          console.error(`[FlashConsumer] ⏱️  IPFS rate limited (429), will retry later`);
-        } else {
-          console.error(`[FlashConsumer] ❌ IPFS upload failed: ${errorMsg}`);
-        }
+        console.error(`[FlashConsumer] ❌ IPFS upload failed: ${errorMsg}`);
       }
 
       // 3. Add to batch updater if IPFS was successful

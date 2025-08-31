@@ -34,8 +34,12 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function getFlashesToMigrate(limit: number = 100): Promise<FlashRecord[]> {
+async function getFlashesToMigrate(limit: number = 100, offset: number = 0): Promise<FlashRecord[]> {
   const pool = getPool();
+  
+  // Support worker-based offset for parallel processing
+  const workerOffset = parseInt(process.env.WORKER_OFFSET || "0");
+  const totalOffset = offset + workerOffset;
   
   // Get total count
   const countResult = await pool.query(`
@@ -53,14 +57,14 @@ async function getFlashesToMigrate(limit: number = 100): Promise<FlashRecord[]> 
     AND img IS NOT NULL
     AND img != ''
     ORDER BY flash_id ASC
-    LIMIT $1
-  `, [limit]);
+    LIMIT $1 OFFSET $2
+  `, [limit, totalOffset]);
   
   
   return result.rows;
 }
 
-async function migrateImageToIPFS(flash: FlashRecord): Promise<boolean> {
+async function migrateImageToIPFS(flash: FlashRecord, retryCount = 0): Promise<boolean> {
   try {
     const s3Key = flash.img.replace(/^\//, "");
     const s3Url = `https://invader-flashes.s3.amazonaws.com/${s3Key}`;
@@ -110,8 +114,29 @@ async function migrateImageToIPFS(flash: FlashRecord): Promise<boolean> {
         'Authorization': `Bearer ${PINATA_JWT}`,
         'Content-Type': 'multipart/form-data'
       },
-      timeout: 60000
+      timeout: 60000,
+      validateStatus: (status) => status < 500 // Don't throw on 4xx errors, we'll handle them
     });
+
+    // Handle rate limiting with exponential backoff
+    if (pinataResponse.status === 429) {
+      const maxRetries = 3;
+      if (retryCount < maxRetries) {
+        const backoffTime = Math.pow(2, retryCount) * 1000; // 1s, 2s, 4s
+        console.log(`⚠️  ${flash.flash_id}: Rate limited, retrying in ${backoffTime}ms (attempt ${retryCount + 1}/${maxRetries})`);
+        await sleep(backoffTime);
+        return await migrateImageToIPFS(flash, retryCount + 1);
+      } else {
+        console.error(`❌ ${flash.flash_id}: Rate limit exceeded after ${maxRetries} retries`);
+        return false;
+      }
+    }
+
+    // Handle other HTTP errors
+    if (pinataResponse.status >= 400) {
+      console.error(`❌ ${flash.flash_id}: Pinata error ${pinataResponse.status}: ${pinataResponse.statusText}`);
+      return false;
+    }
 
     const cid = pinataResponse.data.IpfsHash;
     const ipfsUrl = `ipfs://${cid}`;
@@ -146,8 +171,8 @@ async function migrateImageToIPFS(flash: FlashRecord): Promise<boolean> {
     
     CSVLogger.logIPFSUpload(csvRecord);
     
-    // Small delay to avoid overwhelming services
-    await sleep(1000);
+    // Small delay to avoid overwhelming services - optimized for Pinata Picnic plan (250 req/min)
+    await sleep(250);
     
     return true;
     
@@ -158,7 +183,23 @@ async function migrateImageToIPFS(flash: FlashRecord): Promise<boolean> {
 }
 
 async function runMigration(batchSize: number = 50, maxBatches: number = -1) {
+  const workerId = process.env.WORKER_ID || "1";
+  const workerOffset = parseInt(process.env.WORKER_OFFSET || "0");
+  
+  // Get and display total count of records without ipfs_cid at startup
+  const pool = getPool();
+  const countResult = await pool.query(`
+    SELECT COUNT(*) as count
+    FROM flashes 
+    WHERE ipfs_cid IS NULL
+    AND img IS NOT NULL
+    AND img != ''
+  `);
+  const totalRecordsToMigrate = parseInt(countResult.rows[0].count);
+  
   console.log(`Starting migration: ${batchSize} per batch, ${maxBatches === -1 ? 'unlimited' : maxBatches} batches max`);
+  console.log(`Worker ${workerId}: Starting from offset ${workerOffset}`);
+  console.log(`📊 Total records without IPFS CID: ${totalRecordsToMigrate}`);
   
   const stats: MigrationStats = {
     total: 0,
@@ -168,9 +209,10 @@ async function runMigration(batchSize: number = 50, maxBatches: number = -1) {
   };
   
   let batchCount = 0;
+  let currentOffset = 0;
   
   while (maxBatches === -1 || batchCount < maxBatches) {
-    const flashesToMigrate = await getFlashesToMigrate(batchSize);
+    const flashesToMigrate = await getFlashesToMigrate(batchSize, currentOffset);
     
     if (flashesToMigrate.length === 0) {
       break;
@@ -189,6 +231,12 @@ async function runMigration(batchSize: number = 50, maxBatches: number = -1) {
     }
     
     batchCount++;
+    currentOffset += batchSize;
+    
+    // Progress update every 10 batches
+    if (batchCount % 10 === 0) {
+      console.log(`Worker ${workerId} Progress - Batch ${batchCount}: Processed ${stats.total}, Migrated ${stats.migrated}, Failed ${stats.failed}`);
+    }
     
     // Delay between batches to avoid rate limiting
     if (maxBatches === -1 || batchCount < maxBatches) {
