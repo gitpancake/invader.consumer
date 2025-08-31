@@ -70,31 +70,29 @@ export class BatchUpdater {
       // Log any records that weren't updated (flash_id didn't exist)
       if (result.rowCount < batchToProcess.length) {
         const notUpdated = batchToProcess.length - result.rowCount;
-        const missingIds = batchToProcess.slice(result.rowCount).map(u => u.flash_id);
-        console.error(`[BatchUpdater] 🚨 CRITICAL: ${notUpdated} records missing from database!`);
-        console.error(`[BatchUpdater] Missing flash_ids: ${missingIds.slice(0, 10).join(', ')}${notUpdated > 10 ? '...' : ''}`);
+        console.warn(`[BatchUpdater] ⚠️ ${notUpdated} records not updated (${result.rowCount}/${batchToProcess.length} successful)`);
         
-        // Log a sample to see what's happening
-        if (missingIds.length > 0) {
-          try {
-            const checkResult = await this.dbPool.query(
-              'SELECT flash_id FROM flashes WHERE flash_id = ANY($1::int[])',
-              [missingIds.slice(0, 5)]
-            );
-            console.error(`[BatchUpdater] Double-check found ${checkResult.rows.length} of ${Math.min(5, missingIds.length)} records`);
-            
-            // Check if records were recently inserted
-            const recentResult = await this.dbPool.query(
-              'SELECT flash_id, timestamp FROM flashes WHERE flash_id = ANY($1::int[]) ORDER BY timestamp DESC',
-              [missingIds.slice(0, 5)]
-            );
-            if (recentResult.rows.length > 0) {
-              console.error(`[BatchUpdater] Found ${recentResult.rows.length} records with timestamps:`, 
-                recentResult.rows.map((r: any) => `${r.flash_id}:${r.timestamp}`));
-            }
-          } catch (checkError) {
-            console.error(`[BatchUpdater] Error double-checking records:`, checkError);
+        // Find which specific records failed by checking what exists
+        try {
+          const allBatchIds = batchToProcess.map(u => u.flash_id);
+          const existingResult = await this.dbPool.query(
+            'SELECT flash_id FROM flashes WHERE flash_id = ANY($1::int[])',
+            [allBatchIds]
+          );
+          
+          const existingIds = new Set(existingResult.rows.map((r: any) => r.flash_id));
+          const missingIds = allBatchIds.filter(id => !existingIds.has(id));
+          
+          if (missingIds.length > 0) {
+            console.warn(`[BatchUpdater] Records not found in database: ${missingIds.slice(0, 10).join(', ')}${missingIds.length > 10 ? ` (+${missingIds.length - 10} more)` : ''}`);
           }
+          
+          // If all records exist but some weren't updated, it might be a concurrency issue
+          if (missingIds.length === 0 && notUpdated > 0) {
+            console.warn(`[BatchUpdater] All records exist but ${notUpdated} weren't updated - possible concurrency issue`);
+          }
+        } catch (checkError) {
+          console.error(`[BatchUpdater] Error checking failed records:`, checkError);
         }
       }
       
