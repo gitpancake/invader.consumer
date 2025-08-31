@@ -35,8 +35,10 @@ class ParallelMigrationManager {
   private logDir: string;
   private isShuttingDown = false;
   private totalRecordsToMigrate = 0;
+  private headless = false;
 
-  constructor() {
+  constructor(headless = false) {
+    this.headless = headless;
     this.logDir = path.join(process.cwd(), 'migration-logs');
     this.ensureLogDir();
     this.setupSignalHandlers();
@@ -240,13 +242,27 @@ class ParallelMigrationManager {
   private displayStatus() {
     if (this.isShuttingDown) return;
 
-    console.clear();
-    console.log('🔄 PARALLEL MIGRATION STATUS\n');
-    console.log('=' .repeat(120));
-    
     let totalProcessed = 0;
     let totalMigrated = 0;
     let totalFailed = 0;
+    
+    for (const [workerId, status] of this.workerStatus) {
+      totalProcessed += status.processed;
+      totalMigrated += status.migrated;
+      totalFailed += status.failed;
+    }
+
+    if (this.headless) {
+      // Headless mode: simple periodic status without clearing screen
+      const overallProgress = this.totalRecordsToMigrate > 0 ? (totalProcessed / this.totalRecordsToMigrate * 100).toFixed(2) : '0.00';
+      console.log(`[${new Date().toISOString()}] Progress: ${overallProgress}% | Processed: ${totalProcessed.toLocaleString()} | Migrated: ${totalMigrated.toLocaleString()} | Failed: ${totalFailed.toLocaleString()} | Remaining: ${(this.totalRecordsToMigrate - totalProcessed).toLocaleString()}`);
+      return;
+    }
+
+    // Interactive mode: full status display
+    console.clear();
+    console.log('🔄 PARALLEL MIGRATION STATUS\n');
+    console.log('=' .repeat(120));
     
     for (const [workerId, status] of this.workerStatus) {
       const runtime = Math.floor((Date.now() - status.startTime.getTime()) / 1000);
@@ -270,10 +286,6 @@ class ParallelMigrationManager {
         `Rate: ${rate}/min | ` +
         `Runtime: ${Math.floor(runtime/60)}:${(runtime%60).toString().padStart(2,'0')}`
       );
-      
-      totalProcessed += status.processed;
-      totalMigrated += status.migrated;
-      totalFailed += status.failed;
     }
     
     console.log('=' .repeat(120));
@@ -332,7 +344,7 @@ class ParallelMigrationManager {
     // Start status display
     const statusInterval = setInterval(() => {
       this.displayStatus();
-    }, 5000);
+    }, this.headless ? 600000 : 5000); // 10 minutes for headless, 5 seconds for interactive
     
     // Initial display
     setTimeout(() => this.displayStatus(), 2000);
@@ -355,7 +367,10 @@ class ParallelMigrationManager {
 
 // Run if called directly
 if (require.main === module) {
-  const manager = new ParallelMigrationManager();
+  const args = process.argv.slice(2);
+  const headless = args.includes('--headless');
+  
+  const manager = new ParallelMigrationManager(headless);
   manager.start().catch(error => {
     console.error('Migration failed:', error);
     process.exit(1);
