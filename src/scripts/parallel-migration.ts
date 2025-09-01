@@ -344,7 +344,7 @@ class ParallelMigrationManager {
     // Start status display
     const statusInterval = setInterval(() => {
       this.displayStatus();
-    }, this.headless ? 600000 : 5000); // 10 minutes for headless, 5 seconds for interactive
+    }, this.headless ? 3600000 : 5000); // 1 hour for headless, 5 seconds for interactive
     
     // Initial display
     setTimeout(() => this.displayStatus(), 2000);
