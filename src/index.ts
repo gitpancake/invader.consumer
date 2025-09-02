@@ -22,8 +22,8 @@ if (!PINATA_JWT) {
 
 const BASE_URL = "https://api.space-invaders.com";
 
-// Rate limiter for overall processing - configurable rate limit
-const requestsPerMinute = parseInt(process.env.CONSUMER_RATE_LIMIT || '200');
+// Rate limiter for overall processing - configurable rate limit  
+const requestsPerMinute = parseInt(process.env.CONSUMER_RATE_LIMIT || '150');
 const delayMs = Math.floor(60000 / requestsPerMinute); // Convert req/min to delay in ms
 const processingRateLimiter = new RateLimiter(delayMs);
 
