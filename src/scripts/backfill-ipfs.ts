@@ -230,8 +230,8 @@ async function backfillFlashToIPFS(flash: FlashRecord, retryCount = 0): Promise<
     
     CSVLogger.logIPFSUpload(csvRecord);
     
-    // Delay to respect rate limits - conservative for backfill
-    await sleep(2000); // 2 seconds between requests
+    // Delay to respect rate limits - 250 req/min = ~240ms between requests
+    await sleep(250); // 250ms = ~240 req/min
     
     return true;
     
@@ -338,7 +338,7 @@ if (require.main === module) {
   console.log(`Records to process: ${recordCount}`);
   console.log(`Mode: ${onlyMissing ? 'Only missing IPFS records' : 'All records (latest first)'}`);
   console.log(`Batch size: ${batchSize}`);
-  console.log(`Rate limit: ~1800 records/hour (2s delay between uploads)`);
+  console.log(`Rate limit: ~15000 records/hour (250 req/min)`);
   
   runBackfill(recordCount, onlyMissing, batchSize)
     .then(() => {
