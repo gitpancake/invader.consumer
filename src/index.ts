@@ -282,6 +282,13 @@ class FlashConsumer extends RabbitMQBaseConsumer {
 (async () => {
   const consumer = new FlashConsumer();
   const testMode = process.env.TEST_MODE === "true";
+  
+  // Display proxy status at startup
+  if (proxyRotator.hasProxies()) {
+    console.log(`🔗 [FlashConsumer] Proxy enabled: ${proxyRotator.getProxyCount()} proxies configured`);
+  } else {
+    console.log(`🌐 [FlashConsumer] No proxy configured - using direct connections`);
+  }
 
   // Graceful shutdown handler
   const shutdown = async (signal: string) => {

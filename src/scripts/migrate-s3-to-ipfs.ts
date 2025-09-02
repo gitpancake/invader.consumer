@@ -201,6 +201,13 @@ async function runMigration(batchSize: number = 50, maxBatches: number = -1) {
   const workerId = process.env.WORKER_ID || "1";
   const workerOffset = parseInt(process.env.WORKER_OFFSET || "0");
   
+  // Display proxy status at startup
+  if (proxyRotator.hasProxies()) {
+    console.log(`🔗 [Migration] Proxy enabled: ${proxyRotator.getProxyCount()} proxies configured`);
+  } else {
+    console.log(`🌐 [Migration] No proxy configured - using direct connections`);
+  }
+  
   // Get and display total count of records without ipfs_cid at startup
   const pool = getPool();
   const countResult = await pool.query(`
