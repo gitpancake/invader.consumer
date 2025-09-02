@@ -255,7 +255,10 @@ class FlashConsumer extends RabbitMQBaseConsumer {
 
       // Report status and throw error if failed
       if (ipfsSuccess) {
-        console.log(`Successful pin for flash_id ${flash.flash_id}: ${cid}`);
+        // Only log every 100th successful pin to reduce log spam
+        if (flash.flash_id % 100 === 0) {
+          console.log(`Successful pin for flash_id ${flash.flash_id}: ${cid}`);
+        }
       } else {
         throw new Error("IPFS upload failed");
       }
