@@ -137,6 +137,33 @@ class FlashConsumer extends RabbitMQBaseConsumer {
     this.batchUpdater = new BatchUpdater(this.dbPool, 600);
   }
 
+  protected shouldRequeueOnFailure(error: Error): boolean {
+    const errorMessage = error.message.toLowerCase();
+    
+    // Requeue on network/connection errors that might be temporary
+    const temporaryErrors = [
+      'timeout',
+      'network',
+      'connection',
+      'econnreset',
+      'enotfound', 
+      'rate limited',
+      'status code 429',
+      'status code 5', // 5xx server errors
+    ];
+    
+    const isTemporary = temporaryErrors.some(term => errorMessage.includes(term));
+    
+    if (isTemporary) {
+      console.log(`[FlashConsumer] Temporary error detected: ${error.message} - will requeue`);
+      return true;
+    }
+    
+    // Don't requeue on permanent errors (4xx client errors, invalid data, etc.)
+    console.log(`[FlashConsumer] Permanent error detected: ${error.message} - will not requeue`);
+    return false;
+  }
+
   protected async handleMessage(msg: ConsumeMessage): Promise<void> {
     const content = msg.content.toString();
     const flash: Flash = JSON.parse(content);

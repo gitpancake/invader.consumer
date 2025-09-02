@@ -17,6 +17,11 @@ export abstract class RabbitMQBaseConsumer {
   }
 
   protected abstract handleMessage(msg: ConsumeMessage): Promise<void>;
+  
+  // Override this to return true if message should be requeued on failure
+  protected shouldRequeueOnFailure(error: Error): boolean {
+    return false; // Default: don't requeue
+  }
 
   public async startConsuming(testMode: boolean = false) {
     const connection = await connect(this.rabbitUrl);
@@ -45,7 +50,14 @@ export abstract class RabbitMQBaseConsumer {
           } catch (err) {
             console.error("[RabbitMQBaseConsumer] Error processing message:", err);
             if (!testMode) {
-              channel.nack(msg, false, false);
+              const shouldRequeue = this.shouldRequeueOnFailure(err as Error);
+              if (shouldRequeue) {
+                console.log("[RabbitMQBaseConsumer] Requeuing message for retry");
+                channel.nack(msg, false, true); // Requeue for retry
+              } else {
+                console.log("[RabbitMQBaseConsumer] Not requeuing - message will be discarded");
+                channel.nack(msg, false, false); // Don't requeue
+              }
             } else {
               // In test mode, still requeue even on error
               channel.nack(msg, false, true);
