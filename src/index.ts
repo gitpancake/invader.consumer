@@ -312,7 +312,10 @@ class FlashConsumer extends RabbitMQBaseConsumer {
   const consumer = new FlashConsumer();
   const testMode = process.env.TEST_MODE === "true";
   
-  // Display proxy status at startup
+  // Initialize proxy health checks BEFORE starting processing
+  await proxyRotator.initialize();
+  
+  // Display proxy status after initialization
   if (proxyRotator.getTotalProxyCount() > 0) {
     console.log(`🔗 [FlashConsumer] Proxy system enabled: ${proxyRotator.getProxyCount()}/${proxyRotator.getTotalProxyCount()} proxies verified working`);
   } else {

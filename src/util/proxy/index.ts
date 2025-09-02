@@ -26,13 +26,17 @@ export class ProxyRotator {
 
   constructor() {
     this.loadProxiesFromEnv();
-    // Start health check process after loading proxies
+    // Set up periodic re-checking every 10 minutes
     if (this.proxies.length > 0) {
-      this.performInitialHealthCheck();
-      // Set up periodic re-checking every 10 minutes
       setInterval(() => {
         this.recheckFailedProxies();
       }, 600000); // 10 minutes
+    }
+  }
+
+  public async initialize(): Promise<void> {
+    if (this.proxies.length > 0 && !this.healthCheckInProgress) {
+      await this.performInitialHealthCheck();
     }
   }
 

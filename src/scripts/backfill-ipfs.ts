@@ -207,9 +207,18 @@ async function runBackfill(recordCount: number = 1000, onlyMissing: boolean = tr
   console.log(`🔄 Starting IPFS backfill for ${recordCount} records (onlyMissing: ${onlyMissing})...`);
   console.log(`📊 Batch size: ${batchSize}`);
   
-  // Display proxy status at startup
-  if (proxyRotator.hasProxies()) {
-    console.log(`🔗 [Backfill] Proxy enabled: ${proxyRotator.getProxyCount()} proxies configured`);
+  // Initialize proxy health checks BEFORE starting processing
+  await proxyRotator.initialize();
+  
+  // Display proxy status after initialization
+  if (proxyRotator.getTotalProxyCount() > 0) {
+    const workingCount = proxyRotator.getProxyCount();
+    console.log(`🔗 [Backfill] Proxy system enabled: ${workingCount}/${proxyRotator.getTotalProxyCount()} proxies verified working`);
+    
+    if (workingCount === 0) {
+      console.log(`🚨 [Backfill] WARNING: No working proxies found! All proxies failed health checks.`);
+      console.log(`🌐 [Backfill] Proceeding with direct connections - may encounter rate limiting`);
+    }
   } else {
     console.log(`🌐 [Backfill] No proxy configured - using direct connections`);
   }
