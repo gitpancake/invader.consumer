@@ -115,7 +115,7 @@ async function retryRequest<T>(requestFn: () => Promise<T>, maxRetries: number =
 
       // Exponential backoff with jitter
       const delay = baseDelay * Math.pow(2, attempt) + Math.random() * 1000;
-      console.log(`[FlashConsumer] Request failed, retrying in ${Math.round(delay)}ms (attempt ${attempt + 1}/${maxRetries + 1})`);
+      console.log(`[FlashConsumer] Request failed: ${lastError.message}, retrying in ${Math.round(delay)}ms (attempt ${attempt + 1}/${maxRetries + 1})`);
       await sleep(delay);
     }
   }
