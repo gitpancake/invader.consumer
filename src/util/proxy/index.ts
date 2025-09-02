@@ -36,6 +36,12 @@ export class ProxyRotator {
 
   public async initialize(): Promise<void> {
     if (this.proxies.length > 0 && !this.healthCheckInProgress) {
+      // For OxLabs, skip health checks since they handle failures internally and may have domain-specific auth
+      if (this.isOxylabs) {
+        console.log(`[ProxyRotator] 🔗 OxLabs detected - skipping health checks (they handle failures internally)`);
+        this.workingProxies = [...this.proxies]; // Copy all proxies to working pool
+        return;
+      }
       await this.performInitialHealthCheck();
     }
   }
@@ -93,6 +99,9 @@ export class ProxyRotator {
     this.healthCheckInProgress = true;
     console.log(`[ProxyRotator] 🔍 Starting health check for ${this.proxies.length} proxies...`);
     
+    // Clear working proxies array before health check
+    this.workingProxies = [];
+    
     const healthCheckPromises = this.proxies.map(async (proxy) => {
       const isHealthy = await this.checkProxyHealth(proxy);
       const proxyKey = `${proxy.host}:${proxy.port}`;
@@ -109,6 +118,8 @@ export class ProxyRotator {
       } else {
         console.log(`[ProxyRotator] ❌ Proxy ${proxyKey} - FAILED`);
       }
+      
+      return { proxy, isHealthy };
     });
     
     await Promise.all(healthCheckPromises);
@@ -120,6 +131,8 @@ export class ProxyRotator {
   private async checkProxyHealth(proxy: ProxyConfig): Promise<boolean> {
     try {
       const proxyUrl = `${proxy.protocol}://${proxy.auth ? `${proxy.auth.username}:${proxy.auth.password}@` : ''}${proxy.host}:${proxy.port}`;
+      console.log(`[ProxyRotator] 🔍 Testing proxy URL: ${proxyUrl.replace(/:([^:@]+)@/, ':***@')}`); // Mask password in logs
+      
       const agent = new HttpsProxyAgent(proxyUrl);
       
       // Test with a simple API endpoint (not our target to avoid rate limiting during health checks)
@@ -127,8 +140,11 @@ export class ProxyRotator {
       
       const response = await axios.get(testUrl, {
         httpsAgent: agent,
-        timeout: 10000, // 10 second timeout for health checks
+        timeout: 15000, // Increased timeout for OxLabs
         validateStatus: (status) => status < 500, // Accept 4xx but not 5xx
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
       });
       
       const isHealthy = response.status < 400;
@@ -140,14 +156,23 @@ export class ProxyRotator {
       // Check specifically for 407 authentication errors
       const is407Error = error?.response?.status === 407 || 
                         error?.message?.includes('407') || 
-                        error?.message?.includes('Proxy Authentication');
+                        error?.message?.includes('Proxy Authentication') ||
+                        error?.message?.includes('CONNECT tunnel failed, response 407');
       
       console.log(`[ProxyRotator] 🔍 Proxy ${proxy.host}:${proxy.port} health check ERROR: ${error.message} (407: ${is407Error})`);
       
       if (is407Error) {
-        // Silent failure for 407 - just mark as unhealthy
+        console.log(`[ProxyRotator] 🚫 Proxy ${proxy.host}:${proxy.port} - 407 Authentication failure (credentials may be incorrect)`);
         return false;
       }
+      
+      // Log full error details for debugging
+      console.log(`[ProxyRotator] 🔍 Full error details:`, {
+        message: error.message,
+        code: error.code,
+        status: error?.response?.status,
+        statusText: error?.response?.statusText
+      });
       
       // For other errors, also mark as unhealthy but could be temporary
       return false;
@@ -242,9 +267,21 @@ export class ProxyRotator {
   }
 
   private markProxyAsFailed(proxy: ProxyConfig, error?: Error): void {
-    // Don't track failures for Oxylabs since they handle rotation internally
+    // Don't track failures for Oxylabs since they handle rotation internally and can be spotty
     if (this.isOxylabs) {
-      console.log(`[ProxyRotator] Request failed with Oxylabs proxy ${proxy.host}:${proxy.port} - will retry with same endpoint`);
+      // Reduce log spam for OxLabs - only log every 5th failure or first failure
+      const proxyKey = `${proxy.host}:${proxy.port}`;
+      const currentCount = this.proxyFailureCount.get(proxyKey) || 0;
+      this.proxyFailureCount.set(proxyKey, currentCount + 1);
+      
+      if (currentCount === 0 || (currentCount + 1) % 5 === 0) {
+        const is407Error = error?.message?.includes('407') || error?.message?.includes('Proxy Authentication');
+        if (is407Error) {
+          console.log(`[ProxyRotator] 407 error with Oxylabs proxy ${proxyKey} (${currentCount + 1} times) - known to be spotty`);
+        } else {
+          console.log(`[ProxyRotator] Request failed with Oxylabs proxy ${proxyKey} (${currentCount + 1} times) - will retry`);
+        }
+      }
       return;
     }
     

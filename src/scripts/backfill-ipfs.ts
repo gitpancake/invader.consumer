@@ -32,6 +32,45 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Retry function with special handling for OxLabs 407 errors
+async function retryRequest<T>(requestFn: () => Promise<T>, maxRetries: number = 3, baseDelay: number = 1000): Promise<T> {
+  let lastError: Error;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await requestFn();
+    } catch (error) {
+      lastError = error as Error;
+
+      if (attempt === maxRetries) {
+        throw lastError;
+      }
+
+      // Check for OxLabs 407 errors - use shorter delay since they're often temporary
+      const is407Error = lastError.message?.includes('407') || lastError.message?.includes('Proxy Authentication');
+      const isOxLabsError = lastError.message?.includes('oxylabs');
+      
+      let delay: number;
+      if (is407Error && isOxLabsError) {
+        // Shorter delay for OxLabs 407 errors since they're often just temporary hiccups
+        delay = 2000 + Math.random() * 1000; // 2-3 seconds
+        // Only log first and last attempts to reduce spam
+        if (attempt === 0 || attempt === maxRetries - 1) {
+          console.log(`[Backfill] OxLabs 407 error (attempt ${attempt + 1}/${maxRetries + 1}) - retrying in ${Math.round(delay)}ms`);
+        }
+      } else {
+        // Exponential backoff for other errors
+        delay = baseDelay * Math.pow(2, attempt) + Math.random() * 1000;
+        console.log(`[Backfill] Request failed: ${lastError.message}, retrying in ${Math.round(delay)}ms (attempt ${attempt + 1}/${maxRetries + 1})`);
+      }
+      
+      await sleep(delay);
+    }
+  }
+
+  throw lastError!;
+}
+
 async function getRecordsToBackfill(limit: number = 1000, offset: number = 0): Promise<FlashRecord[]> {
   const pool = getPool();
   
@@ -92,22 +131,24 @@ async function backfillFlashToIPFS(flash: FlashRecord, retryCount = 0): Promise<
       console.log(`[Backfill] Using proxy: ${proxy.host}:${proxy.port} for flash_id: ${flash.flash_id}`);
     }
 
-    // Download image from API
-    let response;
-    try {
-      response = await axios.get(imageUrl, {
-        responseType: "arraybuffer",
-        timeout: 30000,
-        validateStatus: (status) => status < 400,
-        // Use proxy agent if available
-        httpsAgent: agent,
-      });
-      console.log(`[Backfill] Downloaded from API: ${imageUrl}`);
-    } catch (downloadError) {
-      // Mark proxy as failed if this was a proxy request
-      proxyRotator.handleProxyFailure(proxy, downloadError as Error);
-      throw downloadError;
-    }
+    // Download image from API with retry logic
+    const response = await retryRequest(async () => {
+      try {
+        const result = await axios.get(imageUrl, {
+          responseType: "arraybuffer",
+          timeout: 30000,
+          validateStatus: (status) => status < 400,
+          // Use proxy agent if available
+          httpsAgent: agent,
+        });
+        console.log(`[Backfill] Downloaded from API: ${imageUrl}`);
+        return result;
+      } catch (downloadError) {
+        // Mark proxy as failed if this was a proxy request
+        proxyRotator.handleProxyFailure(proxy, downloadError as Error);
+        throw downloadError;
+      }
+    }, 5, 2000); // 5 retries with 2 second base delay for OxLabs issues
     
     const contentType = response.headers["content-type"] || "image/jpeg";
     const contentLength = response.headers["content-length"];
@@ -206,6 +247,7 @@ async function backfillFlashToIPFS(flash: FlashRecord, retryCount = 0): Promise<
 async function runBackfill(recordCount: number = 1000, onlyMissing: boolean = true, batchSize: number = 50) {
   console.log(`🔄 Starting IPFS backfill for ${recordCount} records (onlyMissing: ${onlyMissing})...`);
   console.log(`📊 Batch size: ${batchSize}`);
+  
   
   // Initialize proxy health checks BEFORE starting processing
   await proxyRotator.initialize();
