@@ -138,30 +138,9 @@ class FlashConsumer extends RabbitMQBaseConsumer {
   }
 
   protected shouldRequeueOnFailure(error: Error): boolean {
-    const errorMessage = error.message.toLowerCase();
-    
-    // Requeue on network/connection errors that might be temporary
-    const temporaryErrors = [
-      'timeout',
-      'network',
-      'connection',
-      'econnreset',
-      'enotfound', 
-      'rate limited',
-      'status code 429',
-      'status code 5', // 5xx server errors
-    ];
-    
-    const isTemporary = temporaryErrors.some(term => errorMessage.includes(term));
-    
-    if (isTemporary) {
-      console.log(`[FlashConsumer] Temporary error detected: ${error.message} - will requeue`);
-      return true;
-    }
-    
-    // Don't requeue on permanent errors (4xx client errors, invalid data, etc.)
-    console.log(`[FlashConsumer] Permanent error detected: ${error.message} - will not requeue`);
-    return false;
+    // Always requeue failed messages to retry later
+    console.log(`[FlashConsumer] Message failed: ${error.message} - will requeue for retry`);
+    return true;
   }
 
   protected async handleMessage(msg: ConsumeMessage): Promise<void> {
