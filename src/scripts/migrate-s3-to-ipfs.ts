@@ -223,9 +223,32 @@ async function runMigration(batchSize: number = 50, maxBatches: number = -1) {
   `);
   const totalRecordsToMigrate = parseInt(countResult.rows[0].count);
   
+  // Get the timestamp of the first record we'll process
+  const firstRecordResult = await pool.query(`
+    SELECT timestamp
+    FROM flashes 
+    WHERE ipfs_cid IS NULL
+    AND img IS NOT NULL
+    AND img != ''
+    ORDER BY timestamp ASC
+    LIMIT 1 OFFSET $1
+  `, [workerOffset]);
+  
+  const firstRecordDate = firstRecordResult.rows[0]?.timestamp;
+  
   console.log(`Starting migration: ${batchSize} per batch, ${maxBatches === -1 ? 'unlimited' : maxBatches} batches max`);
   console.log(`Worker ${workerId}: Starting from offset ${workerOffset}`);
   console.log(`📊 Total records without IPFS CID: ${totalRecordsToMigrate}`);
+  
+  if (firstRecordDate) {
+    const dateStr = new Date(firstRecordDate).toLocaleDateString('en-US', { 
+      weekday: 'long', 
+      year: 'numeric', 
+      month: 'long', 
+      day: 'numeric' 
+    });
+    console.log(`📅 Starting with flash from ${dateStr}`);
+  }
   
   const stats: MigrationStats = {
     total: 0,
