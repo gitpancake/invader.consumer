@@ -54,10 +54,7 @@ async function retryRequest<T>(requestFn: () => Promise<T>, maxRetries: number =
       if (is407Error && isOxLabsError) {
         // Shorter delay for OxLabs 407 errors since they're often just temporary hiccups
         delay = 2000 + Math.random() * 1000; // 2-3 seconds
-        // Only log first and last attempts to reduce spam
-        if (attempt === 0 || attempt === maxRetries - 1) {
-          console.log(`[Backfill] OxLabs 407 error (attempt ${attempt + 1}/${maxRetries + 1}) - retrying in ${Math.round(delay)}ms`);
-        }
+        // Silent retry for OxLabs 407 errors - no logging
       } else {
         // Exponential backoff for other errors
         delay = baseDelay * Math.pow(2, attempt) + Math.random() * 1000;

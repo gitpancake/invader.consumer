@@ -269,19 +269,7 @@ export class ProxyRotator {
   private markProxyAsFailed(proxy: ProxyConfig, error?: Error): void {
     // Don't track failures for Oxylabs since they handle rotation internally and can be spotty
     if (this.isOxylabs) {
-      // Reduce log spam for OxLabs - only log every 5th failure or first failure
-      const proxyKey = `${proxy.host}:${proxy.port}`;
-      const currentCount = this.proxyFailureCount.get(proxyKey) || 0;
-      this.proxyFailureCount.set(proxyKey, currentCount + 1);
-      
-      if (currentCount === 0 || (currentCount + 1) % 5 === 0) {
-        const is407Error = error?.message?.includes('407') || error?.message?.includes('Proxy Authentication');
-        if (is407Error) {
-          console.log(`[ProxyRotator] 407 error with Oxylabs proxy ${proxyKey} (${currentCount + 1} times) - known to be spotty`);
-        } else {
-          console.log(`[ProxyRotator] Request failed with Oxylabs proxy ${proxyKey} (${currentCount + 1} times) - will retry`);
-        }
-      }
+      // Silent failure tracking for OxLabs - no logging to reduce spam
       return;
     }
     
