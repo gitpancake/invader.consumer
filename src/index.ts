@@ -10,7 +10,6 @@ import { ConsumeMessage } from "amqplib";
 import axios from "axios";
 import { Flash } from "./types/Flash";
 import { BatchUpdater } from "./util/batch-updater";
-import { CSVLogger, IPFSRecord } from "./util/csv-logger";
 import { getPool } from "./util/database";
 import { proxyRotator } from "./util/proxy";
 import { RabbitMQBaseConsumer } from "./util/rabbitmq";
@@ -254,27 +253,9 @@ class FlashConsumer extends RabbitMQBaseConsumer {
         }
       }
 
-      // Report status
-      if (ipfsSuccess) {
-        console.log(`IPFS upload complete for flash_id: ${flash.flash_id}, ipfs: ${cid}`);
-      } else {
+      // Check for success and throw error if failed
+      if (!ipfsSuccess) {
         throw new Error("IPFS upload failed");
-      }
-
-      // Log to CSV for Web3.Storage import later (only if IPFS successful)
-      if (ipfsSuccess && cid) {
-        const csvRecord: IPFSRecord = {
-          flash_id: flash.flash_id,
-          cid,
-          filename,
-          ipfs_url: `ipfs://${cid}`,
-          file_size: fileSize,
-          content_type: contentType,
-          uploaded_at: new Date().toISOString(),
-          source: "API", // Consumer always downloads from API
-        };
-
-        CSVLogger.logIPFSUpload(csvRecord);
       }
 
       // Add small processing delay to be gentle on the system
