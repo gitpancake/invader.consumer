@@ -188,8 +188,8 @@ async function migrateImageToIPFS(flash: FlashRecord, retryCount = 0): Promise<b
     
     CSVLogger.logIPFSUpload(csvRecord);
     
-    // Delay to respect migration rate limit (125 req/min for migration)
-    const migrationRateLimit = parseInt(process.env.MIGRATION_RATE_LIMIT || '125');
+    // Delay to respect migration rate limit (50 req/min for migration)
+    const migrationRateLimit = parseInt(process.env.MIGRATION_RATE_LIMIT || '50');
     const delayMs = Math.floor(60000 / migrationRateLimit);
     await sleep(delayMs);
     
