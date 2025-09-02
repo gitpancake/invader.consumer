@@ -198,7 +198,11 @@ class FlashConsumer extends RabbitMQBaseConsumer {
           
           // Track API failures to crash on consecutive failures
           this.consecutiveApiFailures++;
-          console.error(`[FlashConsumer] API failure ${this.consecutiveApiFailures}/${this.MAX_API_FAILURES} for flash_id: ${flash.flash_id}`);
+          
+          // Only log when we're getting close to the limit or at the limit
+          if (this.consecutiveApiFailures >= this.MAX_API_FAILURES - 2) {
+            console.error(`[FlashConsumer] API failure ${this.consecutiveApiFailures}/${this.MAX_API_FAILURES} for flash_id: ${flash.flash_id}`);
+          }
           
           if (this.consecutiveApiFailures >= this.MAX_API_FAILURES) {
             console.error(`[FlashConsumer] 💥 CRITICAL: ${this.MAX_API_FAILURES} consecutive API failures - crashing consumer to prevent data loss`);
