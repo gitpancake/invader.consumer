@@ -4,6 +4,7 @@ import { config } from "dotenv";
 import { Flash } from "../types/Flash";
 import { getPool, closePool } from "../util/database";
 import { CSVLogger, IPFSRecord } from "../util/csv-logger";
+import { proxyRotator } from "../util/proxy";
 
 config({ path: ".env" });
 
@@ -139,13 +140,29 @@ async function processFlash(flash: Flash): Promise<void> {
 
     const response = await retryRequest(async () => {
       const headers = getRealisticHeaders();
-      return await axios.get(imageUrl, {
-        responseType: "arraybuffer",
-        headers,
-        timeout: 30000,
-        maxRedirects: 5,
-        validateStatus: (status) => status < 400,
-      });
+      
+      // Get proxy agent for this request
+      const { agent, proxy } = proxyRotator.createProxyAgent(imageUrl);
+      
+      if (proxy) {
+        console.log(`Using proxy: ${proxy.host}:${proxy.port} for ${flash.flash_id}`);
+      }
+
+      try {
+        return await axios.get(imageUrl, {
+          responseType: "arraybuffer",
+          headers,
+          timeout: 30000,
+          maxRedirects: 5,
+          validateStatus: (status) => status < 400,
+          // Use proxy agent if available
+          ...(imageUrl.startsWith('https://') ? { httpsAgent: agent } : { httpAgent: agent }),
+        });
+      } catch (error) {
+        // Mark proxy as failed if this was a proxy request
+        proxyRotator.handleProxyFailure(proxy);
+        throw error;
+      }
     });
 
     const contentType = response.headers["content-type"] || "image/jpeg";

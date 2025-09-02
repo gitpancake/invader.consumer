@@ -13,6 +13,8 @@
     "amqplib": "^0.10.8",
     "axios": "^1.10.0",
     "dotenv": "^17.0.0",
+    "http-proxy-agent": "^7.0.2",
+    "https-proxy-agent": "^7.0.6",
     "pg": "^8.16.3"
   },
   "engines": {
@@ -26,6 +28,7 @@
     "migrate": "tsc && node dist/scripts/migrate-s3-to-ipfs.js",
     "migrate:batch": "tsc && node dist/scripts/migrate-s3-to-ipfs.js",
     "migrate:parallel": "tsc && node dist/scripts/parallel-migration.js",
+    "backfill": "tsc && node dist/scripts/backfill-ipfs.js",
     "test-upload": "tsc && node dist/scripts/test-dual-upload.js",
     "generate-web3-csv": "node -e \"const {CSVLogger} = require('./dist/util/csv-logger'); console.log('Generated:', CSVLogger.generateWeb3StorageCSV());\""
   }

@@ -1,4 +1,4 @@
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+// AWS S3 removed - using IPFS only
 import { ConsumeMessage } from "amqplib";
 import axios from "axios";
 import { config } from "dotenv";
@@ -6,6 +6,7 @@ import { Flash } from "./types/Flash";
 import { BatchUpdater } from "./util/batch-updater";
 import { CSVLogger, IPFSRecord } from "./util/csv-logger";
 import { getPool } from "./util/database";
+import { proxyRotator } from "./util/proxy";
 import { RabbitMQBaseConsumer } from "./util/rabbitmq";
 import { RateLimiter } from "./util/rate-limiter";
 
@@ -18,10 +19,6 @@ if (!PINATA_JWT) {
   throw new Error("PINATA_JWT environment variable is required");
 }
 
-// AWS S3 configuration (for dual storage)
-const REGION = process.env.AWS_REGION;
-const BUCKET_NAME = process.env.BUCKET_NAME;
-const s3 = new S3Client({ region: REGION });
 const BASE_URL = "https://api.space-invaders.com";
 
 // Rate limiter for IPFS uploads - 50 req/min total during migration period
@@ -127,6 +124,8 @@ async function retryRequest<T>(requestFn: () => Promise<T>, maxRetries: number =
 class FlashConsumer extends RabbitMQBaseConsumer {
   private dbPool: any;
   public batchUpdater: BatchUpdater; // Make public for shutdown access
+  private consecutiveApiFailures: number = 0;
+  private readonly MAX_API_FAILURES = 20; // Crash after 20 consecutive API failures
 
   constructor() {
     super();
@@ -150,49 +149,53 @@ class FlashConsumer extends RabbitMQBaseConsumer {
 
       const response = await retryRequest(async () => {
         const headers = getRealisticHeaders();
-        // console.log(`[FlashConsumer] Requesting image with User-Agent: ${headers["User-Agent"].substring(0, 50)}...`);
+        
+        // Get proxy agent for this request
+        const { agent, proxy } = proxyRotator.createProxyAgent(imageUrl);
+        
+        if (proxy) {
+          console.log(`[FlashConsumer] Using proxy: ${proxy.host}:${proxy.port} for ${flash.flash_id}`);
+        }
 
-        return await axios.get(imageUrl, {
-          responseType: "arraybuffer",
-          headers,
-          timeout: 30000,
-          maxRedirects: 5,
-          validateStatus: (status) => status < 400, // Only accept 2xx and 3xx status codes
-        });
+        try {
+          return await axios.get(imageUrl, {
+            responseType: "arraybuffer",
+            headers,
+            timeout: 30000,
+            maxRedirects: 5,
+            validateStatus: (status) => status < 400, // Only accept 2xx and 3xx status codes
+            // Use proxy agent if available
+            ...(imageUrl.startsWith('https://') ? { httpsAgent: agent } : { httpAgent: agent }),
+          });
+        } catch (error) {
+          // Mark proxy as failed if this was a proxy request
+          proxyRotator.handleProxyFailure(proxy);
+          
+          // Track API failures to crash on consecutive failures
+          this.consecutiveApiFailures++;
+          console.error(`[FlashConsumer] API failure ${this.consecutiveApiFailures}/${this.MAX_API_FAILURES} for flash_id: ${flash.flash_id}`);
+          
+          if (this.consecutiveApiFailures >= this.MAX_API_FAILURES) {
+            console.error(`[FlashConsumer] 💥 CRITICAL: ${this.MAX_API_FAILURES} consecutive API failures - crashing consumer to prevent data loss`);
+            process.exit(1);
+          }
+          
+          throw error;
+        }
       });
+
+      // Reset failure counter on successful image download
+      this.consecutiveApiFailures = 0;
 
       const contentType = response.headers["content-type"] || "image/jpeg";
       const contentLength = response.headers["content-length"];
       const fileSize = parseInt(contentLength || "0", 10) || response.data.byteLength;
 
       const filename = originalKey.split("/").pop() || `image_${flash.flash_id}.jpg`;
-      let s3Success = false;
       let ipfsSuccess = false;
       let cid = null;
 
-      // 1. Upload to S3 (existing functionality)
-      try {
-        await s3.send(
-          new PutObjectCommand({
-            Bucket: BUCKET_NAME,
-            Key: originalKey,
-            Body: response.data,
-            ContentType: contentType,
-            ACL: "public-read",
-            Metadata: {
-              "original-url": imageUrl,
-              "downloaded-at": new Date().toISOString(),
-              "user-agent": String(response.config.headers?.["User-Agent"] || "unknown"),
-            },
-          })
-        );
-
-        s3Success = true;
-      } catch (s3Error) {
-        console.error(`[FlashConsumer] ❌ S3 upload failed:`, s3Error instanceof Error ? s3Error.message : s3Error);
-      }
-
-      // 2. Upload to IPFS via Pinata (with rate limiting and retry)
+      // Upload to IPFS via Pinata (with rate limiting and retry)
       try {
         const uploadToIPFS = async (): Promise<string> => {
           // Apply rate limiting for IPFS uploads
@@ -234,7 +237,7 @@ class FlashConsumer extends RabbitMQBaseConsumer {
         console.error(`[FlashConsumer] ❌ IPFS upload failed after retries: ${errorMsg}`);
       }
 
-      // 3. Add to batch updater if IPFS was successful
+      // Add to batch updater if IPFS was successful
       if (ipfsSuccess && cid) {
         try {
           await this.batchUpdater.addUpdate(flash.flash_id, cid);
@@ -243,15 +246,11 @@ class FlashConsumer extends RabbitMQBaseConsumer {
         }
       }
 
-      // 4. Report status
-      if (s3Success && ipfsSuccess) {
-        console.log(`Dual upload complete for flash_id: ${flash.flash_id}, ipfs: ${cid}, s3: ✅`);
-      } else if (s3Success) {
-        console.log(`Dual upload failed for flash_id: ${flash.flash_id}, reason: IPFS failed`);
-      } else if (ipfsSuccess) {
-        console.log(`Dual upload failed for flash_id: ${flash.flash_id}, reason: S3 failed`);
+      // Report status
+      if (ipfsSuccess) {
+        console.log(`IPFS upload complete for flash_id: ${flash.flash_id}, ipfs: ${cid}`);
       } else {
-        throw new Error("Both S3 and IPFS uploads failed");
+        throw new Error("IPFS upload failed");
       }
 
       // Log to CSV for Web3.Storage import later (only if IPFS successful)
@@ -274,7 +273,7 @@ class FlashConsumer extends RabbitMQBaseConsumer {
       await sleep(300);
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : "Unknown error";
-      console.log(`Dual upload failed for flash_id: ${flash.flash_id}, reason: ${errorMsg}`);
+      console.log(`IPFS upload failed for flash_id: ${flash.flash_id}, reason: ${errorMsg}`);
       throw err;
     }
   }

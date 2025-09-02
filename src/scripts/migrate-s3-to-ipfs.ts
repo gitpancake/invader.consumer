@@ -4,6 +4,7 @@ import { config } from "dotenv";
 import axios from "axios";
 import { getPool, closePool } from "../util/database";
 import { CSVLogger, IPFSRecord } from "../util/csv-logger";
+import { proxyRotator } from "../util/proxy";
 
 config({ path: ".env" });
 
@@ -83,17 +84,31 @@ async function migrateImageToIPFS(flash: FlashRecord, retryCount = 0): Promise<b
       });
       console.log(`[Migration] Downloaded from S3: ${s3Url}`);
     } catch (s3Error) {
-      // If S3 fails, try the original API
+      // If S3 fails, try the original API with proxy rotation
       const apiUrl = `https://api.space-invaders.com${flash.img}`;
       console.log(`[Migration] S3 failed, trying API: ${apiUrl}`);
       source = "API";
       
-      response = await axios.get(apiUrl, {
-        responseType: "arraybuffer",
-        timeout: 30000,
-        validateStatus: (status) => status < 400,
-      });
-      console.log(`[Migration] Downloaded from API: ${apiUrl}`);
+      const { agent, proxy } = proxyRotator.createProxyAgent(apiUrl);
+      
+      if (proxy) {
+        console.log(`[Migration] Using proxy: ${proxy.host}:${proxy.port} for flash_id: ${flash.flash_id}`);
+      }
+
+      try {
+        response = await axios.get(apiUrl, {
+          responseType: "arraybuffer",
+          timeout: 30000,
+          validateStatus: (status) => status < 400,
+          // Use proxy agent if available
+          httpsAgent: agent,
+        });
+        console.log(`[Migration] Downloaded from API: ${apiUrl}`);
+      } catch (apiError) {
+        // Mark proxy as failed if this was a proxy request
+        proxyRotator.handleProxyFailure(proxy);
+        throw apiError;
+      }
     }
     
     const contentType = response.headers["content-type"] || "image/jpeg";
