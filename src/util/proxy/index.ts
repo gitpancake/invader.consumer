@@ -2,6 +2,7 @@ import * as http from "http";
 import * as https from "https";
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import { HttpProxyAgent } from 'http-proxy-agent';
+import axios from 'axios';
 
 interface ProxyConfig {
   host: string;
@@ -15,13 +16,24 @@ interface ProxyConfig {
 
 export class ProxyRotator {
   private proxies: ProxyConfig[] = [];
+  private workingProxies: ProxyConfig[] = [];
   private currentProxyIndex: number = 0;
   private failedProxies: Set<string> = new Set();
   private proxyFailureCount: Map<string, number> = new Map();
+  private proxyHealthStatus: Map<string, { working: boolean; lastChecked: number; consecutiveFailures: number }> = new Map();
   private isOxylabs: boolean = false;
+  private healthCheckInProgress: boolean = false;
 
   constructor() {
     this.loadProxiesFromEnv();
+    // Start health check process after loading proxies
+    if (this.proxies.length > 0) {
+      this.performInitialHealthCheck();
+      // Set up periodic re-checking every 10 minutes
+      setInterval(() => {
+        this.recheckFailedProxies();
+      }, 600000); // 10 minutes
+    }
   }
 
   private loadProxiesFromEnv(): void {
@@ -71,12 +83,122 @@ export class ProxyRotator {
     }
   }
 
+  private async performInitialHealthCheck(): Promise<void> {
+    if (this.healthCheckInProgress) return;
+    
+    this.healthCheckInProgress = true;
+    console.log(`[ProxyRotator] 🔍 Starting health check for ${this.proxies.length} proxies...`);
+    
+    const healthCheckPromises = this.proxies.map(async (proxy) => {
+      const isHealthy = await this.checkProxyHealth(proxy);
+      const proxyKey = `${proxy.host}:${proxy.port}`;
+      
+      this.proxyHealthStatus.set(proxyKey, {
+        working: isHealthy,
+        lastChecked: Date.now(),
+        consecutiveFailures: isHealthy ? 0 : 1
+      });
+      
+      if (isHealthy) {
+        this.workingProxies.push(proxy);
+        console.log(`[ProxyRotator] ✅ Proxy ${proxyKey} - HEALTHY`);
+      } else {
+        console.log(`[ProxyRotator] ❌ Proxy ${proxyKey} - FAILED`);
+      }
+    });
+    
+    await Promise.all(healthCheckPromises);
+    
+    console.log(`[ProxyRotator] 📊 Health check complete: ${this.workingProxies.length}/${this.proxies.length} proxies working`);
+    this.healthCheckInProgress = false;
+  }
+
+  private async checkProxyHealth(proxy: ProxyConfig): Promise<boolean> {
+    try {
+      const proxyUrl = `${proxy.protocol}://${proxy.auth ? `${proxy.auth.username}:${proxy.auth.password}@` : ''}${proxy.host}:${proxy.port}`;
+      const agent = new HttpsProxyAgent(proxyUrl);
+      
+      // Test with a simple API endpoint (not our target to avoid rate limiting during health checks)
+      const testUrl = 'https://httpbin.org/get';
+      
+      const response = await axios.get(testUrl, {
+        httpsAgent: agent,
+        timeout: 10000, // 10 second timeout for health checks
+        validateStatus: (status) => status < 500, // Accept 4xx but not 5xx
+      });
+      
+      return response.status < 400; // Healthy if we get 2xx or 3xx
+      
+    } catch (error: any) {
+      // Check specifically for 407 authentication errors
+      const is407Error = error?.response?.status === 407 || 
+                        error?.message?.includes('407') || 
+                        error?.message?.includes('Proxy Authentication');
+      
+      if (is407Error) {
+        // Silent failure for 407 - just mark as unhealthy
+        return false;
+      }
+      
+      // For other errors, also mark as unhealthy but could be temporary
+      return false;
+    }
+  }
+
+  private async recheckFailedProxies(): Promise<void> {
+    const failedProxies = this.proxies.filter(proxy => {
+      const proxyKey = `${proxy.host}:${proxy.port}`;
+      const status = this.proxyHealthStatus.get(proxyKey);
+      return status && !status.working;
+    });
+    
+    if (failedProxies.length === 0) return;
+    
+    console.log(`[ProxyRotator] 🔄 Re-checking ${failedProxies.length} failed proxies...`);
+    
+    for (const proxy of failedProxies) {
+      const proxyKey = `${proxy.host}:${proxy.port}`;
+      const isHealthy = await this.checkProxyHealth(proxy);
+      const currentStatus = this.proxyHealthStatus.get(proxyKey)!;
+      
+      if (isHealthy && !currentStatus.working) {
+        // Proxy is now working - add it back to working pool
+        this.workingProxies.push(proxy);
+        this.proxyHealthStatus.set(proxyKey, {
+          working: true,
+          lastChecked: Date.now(),
+          consecutiveFailures: 0
+        });
+        console.log(`[ProxyRotator] ✅ Proxy ${proxyKey} - RECOVERED`);
+      } else if (!isHealthy) {
+        // Still failing
+        this.proxyHealthStatus.set(proxyKey, {
+          working: false,
+          lastChecked: Date.now(),
+          consecutiveFailures: currentStatus.consecutiveFailures + 1
+        });
+      }
+    }
+    
+    console.log(`[ProxyRotator] 📊 Recheck complete: ${this.workingProxies.length}/${this.proxies.length} proxies working`);
+  }
+
   private getNextProxy(): ProxyConfig | null {
+    // Use working proxies registry if available
+    if (this.workingProxies.length > 0) {
+      const proxy = this.workingProxies[this.currentProxyIndex % this.workingProxies.length];
+      this.currentProxyIndex = (this.currentProxyIndex + 1) % this.workingProxies.length;
+      return proxy;
+    }
+    
+    // Fallback to original logic if no working proxies (health check still in progress or all failed)
     if (this.proxies.length === 0) return null;
+    
+    console.log('[ProxyRotator] ⚠️ No verified working proxies available, falling back to original pool');
     
     // For Oxylabs, use simple rotation since they handle failures internally
     if (this.isOxylabs) {
-      const proxy = this.proxies[this.currentProxyIndex];
+      const proxy = this.proxies[this.currentProxyIndex % this.proxies.length];
       this.currentProxyIndex = (this.currentProxyIndex + 1) % this.proxies.length;
       return proxy;
     }
@@ -86,7 +208,7 @@ export class ProxyRotator {
     const maxAttempts = this.proxies.length;
     
     while (attempts < maxAttempts) {
-      const proxy = this.proxies[this.currentProxyIndex];
+      const proxy = this.proxies[this.currentProxyIndex % this.proxies.length];
       const proxyKey = `${proxy.host}:${proxy.port}`;
       this.currentProxyIndex = (this.currentProxyIndex + 1) % this.proxies.length;
       
@@ -163,10 +285,14 @@ export class ProxyRotator {
   }
 
   public hasProxies(): boolean {
-    return this.proxies.length > 0;
+    return this.workingProxies.length > 0;
   }
 
   public getProxyCount(): number {
+    return this.workingProxies.length;
+  }
+
+  public getTotalProxyCount(): number {
     return this.proxies.length;
   }
 }
