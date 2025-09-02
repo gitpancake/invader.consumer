@@ -1,12 +1,14 @@
+import { config } from "dotenv";
+
+// Load environment variables FIRST before any other imports
+config({ path: ".env" });
+
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import axios from "axios";
-import { config } from "dotenv";
 import { Flash } from "../types/Flash";
 import { getPool, closePool } from "../util/database";
 import { CSVLogger, IPFSRecord } from "../util/csv-logger";
 import { proxyRotator } from "../util/proxy";
-
-config({ path: ".env" });
 
 const PINATA_JWT = process.env.PINATA_JWT;
 if (!PINATA_JWT) {

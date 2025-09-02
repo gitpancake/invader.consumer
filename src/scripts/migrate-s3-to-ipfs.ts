@@ -1,12 +1,14 @@
-import { S3Client, GetObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { config } from "dotenv";
+
+// Load environment variables FIRST before any other imports
+config({ path: ".env" });
+
+import { S3Client, GetObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 // Using Pinata HTTP API directly
 import axios from "axios";
 import { getPool, closePool } from "../util/database";
 import { CSVLogger, IPFSRecord } from "../util/csv-logger";
 import { proxyRotator } from "../util/proxy";
-
-config({ path: ".env" });
 
 // AWS S3 configuration
 const REGION = process.env.AWS_REGION;

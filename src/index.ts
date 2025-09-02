@@ -1,7 +1,13 @@
+import { config } from "dotenv";
+
+// Load environment variables FIRST before any other imports
+config({
+  path: ".env",
+});
+
 // AWS S3 removed - using IPFS only
 import { ConsumeMessage } from "amqplib";
 import axios from "axios";
-import { config } from "dotenv";
 import { Flash } from "./types/Flash";
 import { BatchUpdater } from "./util/batch-updater";
 import { CSVLogger, IPFSRecord } from "./util/csv-logger";
@@ -9,10 +15,6 @@ import { getPool } from "./util/database";
 import { proxyRotator } from "./util/proxy";
 import { RabbitMQBaseConsumer } from "./util/rabbitmq";
 import { RateLimiter } from "./util/rate-limiter";
-
-config({
-  path: ".env",
-});
 
 const PINATA_JWT = process.env.PINATA_JWT;
 if (!PINATA_JWT) {

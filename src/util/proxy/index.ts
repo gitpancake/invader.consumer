@@ -26,6 +26,8 @@ export class ProxyRotator {
 
   private loadProxiesFromEnv(): void {
     const proxyList = process.env.PROXY_LIST;
+    console.log(`[ProxyRotator] Debug: PROXY_LIST env var = ${proxyList ? '[CONFIGURED]' : '[NOT FOUND]'}`);
+    
     if (proxyList) {
       try {
         // Format: "http://proxy1:8080,https://user:pass@proxy2:3128"
