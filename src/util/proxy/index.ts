@@ -30,10 +30,17 @@ export class ProxyRotator {
     
     if (proxyList) {
       try {
-        // Format: "http://proxy1:8080,https://user:pass@proxy2:3128"
+        // Format: "http://proxy1:8080,https://user:pass@proxy2:3128" or "user:pass@proxy.com:7777"
         const proxyStrings = proxyList.split(',');
         this.proxies = proxyStrings.map(proxyStr => {
-          const url = new URL(proxyStr.trim());
+          let urlString = proxyStr.trim();
+          
+          // Add protocol if missing (default to https for security)
+          if (!urlString.startsWith('http://') && !urlString.startsWith('https://')) {
+            urlString = `https://${urlString}`;
+          }
+          
+          const url = new URL(urlString);
           return {
             host: url.hostname,
             port: parseInt(url.port) || (url.protocol === 'https:' ? 443 : 80),
