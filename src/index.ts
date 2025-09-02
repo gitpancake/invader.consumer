@@ -156,6 +156,17 @@ class FlashConsumer extends RabbitMQBaseConsumer {
     const originalKey = flash.img.replace(/^\//, "");
 
     try {
+      // Check if this flash already has an IPFS CID to avoid duplicate processing
+      const pool = getPool();
+      const existingCheck = await pool.query(
+        'SELECT ipfs_cid FROM flashes WHERE flash_id = $1',
+        [flash.flash_id]
+      );
+      
+      if (existingCheck.rows.length > 0 && existingCheck.rows[0].ipfs_cid) {
+        // Already has IPFS CID, skip processing
+        return;
+      }
       // Apply rate limiting first
       await processingRateLimiter.waitIfNeeded();
       
