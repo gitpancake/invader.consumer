@@ -79,30 +79,41 @@ export class BatchUpdater {
       const result = await this.dbPool.query(query);
       console.log(`[BatchUpdater] ✅ Updated ${result.rowCount} records successfully`);
       
-      // Log any records that weren't updated (flash_id didn't exist)
+      // Log any records that weren't updated 
       if (result.rowCount < batchToProcess.length) {
         const notUpdated = batchToProcess.length - result.rowCount;
-        console.warn(`[BatchUpdater] ⚠️ ${notUpdated} records not updated (${result.rowCount}/${batchToProcess.length} successful)`);
         
-        // Find which specific records failed by checking what exists
+        // Find which specific records weren't updated and why
         try {
           const allBatchIds = batchToProcess.map(u => u.flash_id);
-          const existingResult = await this.dbPool.query(
-            'SELECT flash_id FROM flashes WHERE flash_id = ANY($1::int[])',
+          const checkResult = await this.dbPool.query(
+            'SELECT flash_id, ipfs_cid FROM flashes WHERE flash_id = ANY($1::int[])',
             [allBatchIds]
           );
           
-          const existingIds = new Set(existingResult.rows.map((r: any) => r.flash_id));
-          const missingIds = allBatchIds.filter(id => !existingIds.has(id));
+          const existingRecords = new Map(checkResult.rows.map((r: any) => [r.flash_id, r.ipfs_cid]));
+          const missingIds: number[] = [];
+          const alreadyHaveCids: number[] = [];
           
+          for (const id of allBatchIds) {
+            if (!existingRecords.has(id)) {
+              missingIds.push(id);
+            } else if (existingRecords.get(id)) {
+              alreadyHaveCids.push(id);
+            }
+          }
+          
+          // Only log actual problems (missing records)
           if (missingIds.length > 0) {
-            console.warn(`[BatchUpdater] Records not found in database: ${missingIds.slice(0, 10).join(', ')}${missingIds.length > 10 ? ` (+${missingIds.length - 10} more)` : ''}`);
+            console.warn(`[BatchUpdater] ⚠️ ${missingIds.length} records not found in database: ${missingIds.slice(0, 10).join(', ')}${missingIds.length > 10 ? ` (+${missingIds.length - 10} more)` : ''}`);
           }
           
-          // If all records exist but some weren't updated, it might be a concurrency issue
-          if (missingIds.length === 0 && notUpdated > 0) {
-            console.warn(`[BatchUpdater] All records exist but ${notUpdated} weren't updated - possible concurrency issue`);
+          // Don't log records that already have IPFS CIDs - this is expected behavior
+          if (alreadyHaveCids.length > 0) {
+            // Only log in debug mode or when there are very few
+            console.log(`[BatchUpdater] ✅ ${alreadyHaveCids.length} records skipped (already have IPFS CIDs)`);
           }
+          
         } catch (checkError) {
           console.error(`[BatchUpdater] Error checking failed records:`, checkError);
         }
