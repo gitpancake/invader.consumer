@@ -105,7 +105,7 @@ async function backfillFlashToIPFS(flash: FlashRecord, retryCount = 0): Promise<
       console.log(`[Backfill] Downloaded from API: ${imageUrl}`);
     } catch (downloadError) {
       // Mark proxy as failed if this was a proxy request
-      proxyRotator.handleProxyFailure(proxy);
+      proxyRotator.handleProxyFailure(proxy, downloadError as Error);
       throw downloadError;
     }
     

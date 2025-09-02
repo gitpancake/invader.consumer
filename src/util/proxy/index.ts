@@ -110,7 +110,7 @@ export class ProxyRotator {
     return null;
   }
 
-  private markProxyAsFailed(proxy: ProxyConfig): void {
+  private markProxyAsFailed(proxy: ProxyConfig, error?: Error): void {
     // Don't track failures for Oxylabs since they handle rotation internally
     if (this.isOxylabs) {
       console.log(`[ProxyRotator] Request failed with Oxylabs proxy ${proxy.host}:${proxy.port} - will retry with same endpoint`);
@@ -119,10 +119,21 @@ export class ProxyRotator {
     
     const proxyKey = `${proxy.host}:${proxy.port}`;
     const currentCount = this.proxyFailureCount.get(proxyKey) || 0;
-    this.proxyFailureCount.set(proxyKey, currentCount + 1);
-    this.failedProxies.add(proxyKey);
     
-    console.log(`[ProxyRotator] Proxy ${proxyKey} failed (${currentCount + 1} times)`);
+    // Check for 407 Proxy Authentication errors - blacklist immediately
+    const is407Error = error?.message?.includes('407') || error?.message?.includes('Proxy Authentication');
+    
+    if (is407Error) {
+      // Set failure count high enough to permanently blacklist
+      this.proxyFailureCount.set(proxyKey, 999);
+      this.failedProxies.add(proxyKey);
+      console.log(`[ProxyRotator] 🚫 Proxy ${proxyKey} BLACKLISTED - 407 Authentication failure`);
+    } else {
+      // Normal failure tracking
+      this.proxyFailureCount.set(proxyKey, currentCount + 1);
+      this.failedProxies.add(proxyKey);
+      console.log(`[ProxyRotator] Proxy ${proxyKey} failed (${currentCount + 1} times)`);
+    }
   }
 
   public createProxyAgent(targetUrl: string): { agent: any; proxy: ProxyConfig | null } {
@@ -145,9 +156,9 @@ export class ProxyRotator {
     return { agent, proxy };
   }
 
-  public handleProxyFailure(proxy: ProxyConfig | null): void {
+  public handleProxyFailure(proxy: ProxyConfig | null, error?: Error): void {
     if (proxy) {
-      this.markProxyAsFailed(proxy);
+      this.markProxyAsFailed(proxy, error);
     }
   }
 

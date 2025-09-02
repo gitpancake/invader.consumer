@@ -108,7 +108,7 @@ async function migrateImageToIPFS(flash: FlashRecord, retryCount = 0): Promise<b
         console.log(`[Migration] Downloaded from API: ${apiUrl}`);
       } catch (apiError) {
         // Mark proxy as failed if this was a proxy request
-        proxyRotator.handleProxyFailure(proxy);
+        proxyRotator.handleProxyFailure(proxy, apiError as Error);
         throw apiError;
       }
     }

@@ -198,7 +198,7 @@ class FlashConsumer extends RabbitMQBaseConsumer {
           });
         } catch (error) {
           // Mark proxy as failed if this was a proxy request
-          proxyRotator.handleProxyFailure(proxy);
+          proxyRotator.handleProxyFailure(proxy, error as Error);
           
           // Track API failures to crash on consecutive failures
           this.consecutiveApiFailures++;

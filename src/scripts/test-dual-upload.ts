@@ -162,7 +162,7 @@ async function processFlash(flash: Flash): Promise<void> {
         });
       } catch (error) {
         // Mark proxy as failed if this was a proxy request
-        proxyRotator.handleProxyFailure(proxy);
+        proxyRotator.handleProxyFailure(proxy, error as Error);
         throw error;
       }
     });
