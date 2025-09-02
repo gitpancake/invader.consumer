@@ -75,15 +75,20 @@ export class ProxyRotator {
         });
         console.log(`[ProxyRotator] Loaded ${this.proxies.length} proxies from environment`);
         
-        // If using Oxylabs, disable failure tracking since they handle rotation internally
+        // If using Oxylabs or DataImpulse, disable failure tracking since they handle rotation internally
         this.isOxylabs = this.proxies.some(p => 
           p.host.includes('oxylabs.io') || 
           p.host.includes('pr.oxylabs.io') || 
-          p.host.includes('datacenter.oxylabs.io')
+          p.host.includes('datacenter.oxylabs.io') ||
+          p.host.includes('dataimpulse.com')
         );
         
         if (this.isOxylabs) {
-          console.log('[ProxyRotator] Detected Oxylabs proxies - optimizing configuration for premium service');
+          if (this.proxies.some(p => p.host.includes('oxylabs.io'))) {
+            console.log('[ProxyRotator] Detected Oxylabs proxies - optimizing configuration for premium service');
+          } else if (this.proxies.some(p => p.host.includes('dataimpulse.com'))) {
+            console.log('[ProxyRotator] Detected DataImpulse proxies - optimizing configuration for premium service');
+          }
         }
       } catch (error) {
         console.log('[ProxyRotator] Error parsing proxy list:', error);

@@ -310,6 +310,12 @@ class FlashConsumer extends RabbitMQBaseConsumer {
   const consumer = new FlashConsumer();
   const testMode = process.env.TEST_MODE === "true";
   
+  // Debug environment variables
+  console.log(`[FlashConsumer] Debug: PROXY_LIST = ${process.env.PROXY_LIST ? '[SET]' : '[NOT SET]'}`);
+  if (process.env.PROXY_LIST) {
+    console.log(`[FlashConsumer] Debug: Proxy host = ${process.env.PROXY_LIST.split('@')[1] || 'unknown'}`);
+  }
+  
   // Initialize proxy health checks BEFORE starting processing
   await proxyRotator.initialize();
   
