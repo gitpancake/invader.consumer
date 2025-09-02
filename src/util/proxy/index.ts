@@ -127,13 +127,18 @@ export class ProxyRotator {
         validateStatus: (status) => status < 500, // Accept 4xx but not 5xx
       });
       
-      return response.status < 400; // Healthy if we get 2xx or 3xx
+      const isHealthy = response.status < 400;
+      console.log(`[ProxyRotator] 🔍 Proxy ${proxy.host}:${proxy.port} health check: status ${response.status} = ${isHealthy ? 'HEALTHY' : 'UNHEALTHY'}`);
+      
+      return isHealthy;
       
     } catch (error: any) {
       // Check specifically for 407 authentication errors
       const is407Error = error?.response?.status === 407 || 
                         error?.message?.includes('407') || 
                         error?.message?.includes('Proxy Authentication');
+      
+      console.log(`[ProxyRotator] 🔍 Proxy ${proxy.host}:${proxy.port} health check ERROR: ${error.message} (407: ${is407Error})`);
       
       if (is407Error) {
         // Silent failure for 407 - just mark as unhealthy
