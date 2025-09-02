@@ -188,8 +188,10 @@ async function migrateImageToIPFS(flash: FlashRecord, retryCount = 0): Promise<b
     
     CSVLogger.logIPFSUpload(csvRecord);
     
-    // Delay to stay under Pinata rate limit: 200 req/min total ÷ 6 workers = ~33 req/min per worker
-    await sleep(1800); // 1.8 seconds = ~33 req/min per worker
+    // Delay to respect migration rate limit (125 req/min for migration)
+    const migrationRateLimit = parseInt(process.env.MIGRATION_RATE_LIMIT || '125');
+    const delayMs = Math.floor(60000 / migrationRateLimit);
+    await sleep(delayMs);
     
     return true;
     
@@ -235,6 +237,10 @@ async function runMigration(batchSize: number = 50, maxBatches: number = -1) {
   let batchCount = 0;
   let currentOffset = 0;
   
+  // Parallel processing configuration
+  const concurrency = parseInt(process.env.MIGRATION_CONCURRENCY || '5');
+  console.log(`📊 Migration concurrency: ${concurrency} parallel workers`);
+  
   while (maxBatches === -1 || batchCount < maxBatches) {
     const flashesToMigrate = await getFlashesToMigrate(batchSize, currentOffset);
     
@@ -242,16 +248,26 @@ async function runMigration(batchSize: number = 50, maxBatches: number = -1) {
       break;
     }
     
-    for (const flash of flashesToMigrate) {
-      stats.total++;
+    // Process batch in parallel with limited concurrency
+    const chunks = [];
+    for (let i = 0; i < flashesToMigrate.length; i += concurrency) {
+      chunks.push(flashesToMigrate.slice(i, i + concurrency));
+    }
+    
+    for (const chunk of chunks) {
+      const promises = chunk.map(async (flash) => {
+        stats.total++;
+        const success = await migrateImageToIPFS(flash);
+        if (success) {
+          stats.migrated++;
+        } else {
+          stats.failed++;
+        }
+        return success;
+      });
       
-      const success = await migrateImageToIPFS(flash);
-      
-      if (success) {
-        stats.migrated++;
-      } else {
-        stats.failed++;
-      }
+      // Wait for all parallel operations in this chunk to complete
+      await Promise.all(promises);
     }
     
     batchCount++;

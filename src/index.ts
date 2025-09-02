@@ -23,8 +23,10 @@ if (!PINATA_JWT) {
 
 const BASE_URL = "https://api.space-invaders.com";
 
-// Rate limiter for overall processing - 50 req/min total
-const processingRateLimiter = new RateLimiter(1200); // 1.2 seconds = 50 req/min
+// Rate limiter for overall processing - configurable rate limit
+const requestsPerMinute = parseInt(process.env.CONSUMER_RATE_LIMIT || '125');
+const delayMs = Math.floor(60000 / requestsPerMinute); // Convert req/min to delay in ms
+const processingRateLimiter = new RateLimiter(delayMs);
 
 // Common user agents to rotate through for obfuscation
 const USER_AGENTS = [
