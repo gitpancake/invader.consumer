@@ -15,6 +15,17 @@ export class BatchUpdater {
   }
   
   async addUpdate(flash_id: number, ipfs_cid: string): Promise<void> {
+    // Check if this flash_id already has an IPFS CID to avoid race conditions
+    const existingCheck = await this.dbPool.query(
+      'SELECT ipfs_cid FROM flashes WHERE flash_id = $1',
+      [flash_id]
+    );
+    
+    if (existingCheck.rows.length > 0 && existingCheck.rows[0].ipfs_cid) {
+      // Already has IPFS CID, skip adding to batch
+      return;
+    }
+    
     this.batch.push({ flash_id, ipfs_cid });
     
     // Auto-flush if batch is full

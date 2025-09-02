@@ -51,6 +51,7 @@ async function getFlashesToMigrate(limit: number = 100, offset: number = 0): Pro
     WHERE ipfs_cid IS NULL
     AND img IS NOT NULL
     AND img != ''
+    AND flash_id < 90000000
   `);
   
   const result = await pool.query(`
@@ -59,6 +60,7 @@ async function getFlashesToMigrate(limit: number = 100, offset: number = 0): Pro
     WHERE ipfs_cid IS NULL
     AND img IS NOT NULL
     AND img != ''
+    AND flash_id < 90000000
     ORDER BY flash_id ASC
     LIMIT $1 OFFSET $2
   `, [limit, totalOffset]);
@@ -220,6 +222,7 @@ async function runMigration(batchSize: number = 50, maxBatches: number = -1) {
     WHERE ipfs_cid IS NULL
     AND img IS NOT NULL
     AND img != ''
+    AND flash_id < 90000000
   `);
   const totalRecordsToMigrate = parseInt(countResult.rows[0].count);
   
