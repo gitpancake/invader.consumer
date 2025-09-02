@@ -23,8 +23,8 @@ if (!PINATA_JWT) {
 
 const BASE_URL = "https://api.space-invaders.com";
 
-// Rate limiter for IPFS uploads - 50 req/min total during migration period
-const ipfsRateLimiter = new RateLimiter(1200); // 1.2 seconds = 50 req/min
+// Rate limiter for overall processing - 50 req/min total
+const processingRateLimiter = new RateLimiter(1200); // 1.2 seconds = 50 req/min
 
 // Common user agents to rotate through for obfuscation
 const USER_AGENTS = [
@@ -171,9 +171,11 @@ class FlashConsumer extends RabbitMQBaseConsumer {
     const originalKey = flash.img.replace(/^\//, "");
 
     try {
+      // Apply rate limiting first
+      await processingRateLimiter.waitIfNeeded();
+      
       // Add human-like delay before making the request
       const delay = getRandomDelay();
-      // console.log(`[FlashConsumer] Waiting ${Math.round(delay)}ms before requesting image...`);
       await sleep(delay);
 
       const response = await retryRequest(async () => {
@@ -182,9 +184,7 @@ class FlashConsumer extends RabbitMQBaseConsumer {
         // Get proxy agent for this request
         const { agent, proxy } = proxyRotator.createProxyAgent(imageUrl);
         
-        if (proxy) {
-          console.log(`[FlashConsumer] Using proxy: ${proxy.host}:${proxy.port} for ${flash.flash_id}`);
-        }
+        // Proxy usage logging removed to reduce spam
 
         try {
           return await axios.get(imageUrl, {
@@ -227,8 +227,6 @@ class FlashConsumer extends RabbitMQBaseConsumer {
       // Upload to IPFS via Pinata (with rate limiting and retry)
       try {
         const uploadToIPFS = async (): Promise<string> => {
-          // Apply rate limiting for IPFS uploads
-          await ipfsRateLimiter.waitIfNeeded();
 
           const file = new File([response.data], filename, { type: contentType });
           const formData = new FormData();
