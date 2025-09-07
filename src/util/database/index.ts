@@ -24,9 +24,8 @@ export function getPool(): Pool {
       console.error('Database pool error:', err);
     });
     
-    pool.on('connect', () => {
-      console.log('Database connection established');
-    });
+    // Log only once when pool is created, not on every connection
+    console.log('Database connection pool initialized (max: 20 connections)');
   }
   return pool;
 }
