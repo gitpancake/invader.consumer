@@ -201,11 +201,11 @@ class FlashConsumer extends RabbitMQBaseConsumer {
           
           // Only log when we're getting close to the limit or at the limit
           if (this.consecutiveApiFailures >= this.MAX_API_FAILURES - 2) {
-            console.error(`[FlashConsumer] API failure ${this.consecutiveApiFailures}/${this.MAX_API_FAILURES} for flash_id: ${flash.flash_id}`);
+            console.error(`[${new Date().toISOString()}] [FlashConsumer] API failure ${this.consecutiveApiFailures}/${this.MAX_API_FAILURES} for flash_id: ${flash.flash_id}`);
           }
           
           if (this.consecutiveApiFailures >= this.MAX_API_FAILURES) {
-            console.error(`[FlashConsumer] 💥 CRITICAL: ${this.MAX_API_FAILURES} consecutive API failures - crashing consumer to prevent data loss`);
+            console.error(`[${new Date().toISOString()}] [FlashConsumer] 💥 CRITICAL: ${this.MAX_API_FAILURES} consecutive API failures - crashing consumer to prevent data loss`);
             process.exit(1);
           }
           
@@ -261,7 +261,7 @@ class FlashConsumer extends RabbitMQBaseConsumer {
         ipfsSuccess = true;
       } catch (ipfsError) {
         const errorMsg = ipfsError instanceof Error ? ipfsError.message : "Unknown error";
-        console.error(`[FlashConsumer] ❌ IPFS upload failed after retries: ${errorMsg}`);
+        console.error(`[${new Date().toISOString()}] [FlashConsumer] ❌ IPFS upload failed after retries: ${errorMsg}`);
       }
 
       // Add to batch updater if IPFS was successful
@@ -277,7 +277,7 @@ class FlashConsumer extends RabbitMQBaseConsumer {
       if (ipfsSuccess) {
         // Only log every 100th successful pin to reduce log spam
         if (flash.flash_id % 100 === 0) {
-          console.log(`Successful pin for flash_id ${flash.flash_id}: ${cid}`);
+          console.log(`[${new Date().toISOString()}] Successful pin for flash_id ${flash.flash_id}: ${cid}`);
         }
       } else {
         throw new Error("IPFS upload failed");
@@ -287,7 +287,7 @@ class FlashConsumer extends RabbitMQBaseConsumer {
       await sleep(300);
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : "Unknown error";
-      console.log(`IPFS upload failed for flash_id: ${flash.flash_id}, reason: ${errorMsg}`);
+      console.log(`[${new Date().toISOString()}] IPFS upload failed for flash_id: ${flash.flash_id}, reason: ${errorMsg}`);
       throw err;
     }
   }
