@@ -6,4 +6,5 @@ export interface Flash {
   flash_id: number;
   timestamp: number;
   flash_count: string;
+  ipfs_cid?: string;
 }

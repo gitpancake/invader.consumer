@@ -3,6 +3,10 @@ interface BatchUpdate {
   ipfs_cid: string;
 }
 
+interface FlashRecord {
+  ipfs_cid: string | null;
+}
+
 export interface BatchUpdateResult {
   successful: number;
   failed: BatchUpdate[];
@@ -111,7 +115,7 @@ export class BatchUpdater {
       const allBatchIds = batchToProcess.map((u) => u.flash_id);
       const checkResult = await this.dbPool.query("SELECT flash_id, ipfs_cid FROM flashes WHERE flash_id = ANY($1::int[])", [allBatchIds]);
 
-      const existingRecords = new Map(checkResult.rows.map((r: any) => [r.flash_id, r.ipfs_cid]));
+      const existingRecords = new Map<number, FlashRecord>(checkResult.rows.map((r: any) => [r.flash_id, { ipfs_cid: r.ipfs_cid }]));
       const failed: BatchUpdate[] = [];
       const alreadyProcessed: number[] = [];
       let successful = 0;
