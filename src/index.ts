@@ -9,7 +9,7 @@ config({
 import { ConsumeMessage } from "amqplib";
 import axios from "axios";
 import { Flash } from "./types/Flash";
-import { BatchUpdater } from "./util/batch-updater";
+import { BatchUpdater, BatchUpdateResult } from "./util/batch-updater";
 import { getPool } from "./util/database";
 import { proxyRotator } from "./util/proxy";
 import { RabbitMQBaseConsumer } from "./util/rabbitmq";
@@ -138,6 +138,7 @@ class FlashConsumer extends RabbitMQBaseConsumer {
   private readonly MAX_IPFS_FAILURES = 30; // Separate threshold for IPFS failures
   private ipfsCircuitBreakerOpen: boolean = false;
   private ipfsCircuitBreakerOpenUntil: number = 0;
+  private batchResultCheckInterval: NodeJS.Timeout | null = null;
 
   constructor() {
     super();
@@ -145,6 +146,9 @@ class FlashConsumer extends RabbitMQBaseConsumer {
     this.dbPool = getPool();
     // Initialize batch updater for efficient database updates
     this.batchUpdater = new BatchUpdater(this.dbPool, 600);
+    
+    // Start periodic batch result checking
+    this.startBatchResultMonitoring();
   }
 
   protected shouldRequeueOnFailure(error: Error): boolean {
@@ -183,6 +187,83 @@ class FlashConsumer extends RabbitMQBaseConsumer {
     this.ipfsCircuitBreakerOpen = true;
     this.ipfsCircuitBreakerOpenUntil = Date.now() + 300000; // 5 minutes
     console.log(`[FlashConsumer] ⚠️ IPFS circuit breaker OPEN for 5 minutes due to ${this.consecutiveIPFSFailures} consecutive failures`);
+  }
+
+  private startBatchResultMonitoring(): void {
+    // Check batch results every 30 seconds
+    this.batchResultCheckInterval = setInterval(async () => {
+      try {
+        if (this.batchUpdater.getBatchSize() > 0) {
+          console.log(`[FlashConsumer] Checking batch results - ${this.batchUpdater.getBatchSize()} pending database updates...`);
+          const result = await this.batchUpdater.forceFlush();
+          await this.handleBatchUpdateResult(result);
+        }
+      } catch (error) {
+        console.error(`[FlashConsumer] Error during batch result check:`, error);
+      }
+    }, 30000);
+  }
+
+  private async handleBatchUpdateResult(result: BatchUpdateResult): Promise<void> {
+    if (result.failed.length > 0) {
+      console.log(`[FlashConsumer] Requeuing ${result.failed.length} failed database updates back to RabbitMQ...`);
+      
+      for (const failedUpdate of result.failed) {
+        try {
+          // Recreate the flash message and send back to queue
+          const flashMessage = await this.createFlashMessageFromUpdate(failedUpdate);
+          if (flashMessage) {
+            await this.requeueMessage(flashMessage);
+            console.log(`[FlashConsumer] Requeued flash_id ${failedUpdate.flash_id} to RabbitMQ`);
+          }
+        } catch (requeueError) {
+          console.error(`[FlashConsumer] Failed to requeue flash_id ${failedUpdate.flash_id}:`, requeueError);
+        }
+      }
+    }
+  }
+
+  private async createFlashMessageFromUpdate(update: { flash_id: number; ipfs_cid: string }): Promise<Flash | null> {
+    try {
+      // Get the flash data from database to recreate the message
+      const result = await this.dbPool.query(
+        'SELECT * FROM flashes WHERE flash_id = $1',
+        [update.flash_id]
+      );
+      
+      if (result.rows.length > 0) {
+        const flash = result.rows[0];
+        return {
+          flash_id: flash.flash_id,
+          img: flash.img,
+          city: flash.city,
+          text: flash.text || '',
+          player: flash.player,
+          timestamp: Math.floor(flash.timestamp.getTime() / 1000),
+          flash_count: flash.flash_count || '',
+          ipfs_cid: '' // Clear the IPFS CID so it gets reprocessed
+        };
+      }
+    } catch (error) {
+      console.error(`[FlashConsumer] Error creating flash message for flash_id ${update.flash_id}:`, error);
+    }
+    return null;
+  }
+
+  private async requeueMessage(flash: Flash): Promise<void> {
+    // This method should publish the message back to the RabbitMQ queue
+    // The exact implementation depends on your RabbitMQ setup
+    console.warn(`[FlashConsumer] TODO: Implement message requeuing for flash_id ${flash.flash_id}`);
+    // You would need to add RabbitMQ publisher functionality here
+  }
+
+  public async cleanup(): Promise<void> {
+    // Clear the batch result monitoring interval
+    if (this.batchResultCheckInterval) {
+      clearInterval(this.batchResultCheckInterval);
+      this.batchResultCheckInterval = null;
+      console.log(`[FlashConsumer] Batch result monitoring stopped`);
+    }
   }
 
   protected async handleMessage(msg: ConsumeMessage): Promise<void> {
@@ -388,6 +469,9 @@ class FlashConsumer extends RabbitMQBaseConsumer {
     console.log(`\n[FlashConsumer] Received ${signal}, shutting down gracefully...`);
 
     try {
+      // Stop batch result monitoring
+      await consumer.cleanup();
+
       // Force flush any remaining batch updates
       await consumer.batchUpdater.shutdown();
       console.log(`[FlashConsumer] Batch updater shutdown complete`);

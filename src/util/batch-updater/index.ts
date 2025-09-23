@@ -3,6 +3,12 @@ interface BatchUpdate {
   ipfs_cid: string;
 }
 
+export interface BatchUpdateResult {
+  successful: number;
+  failed: BatchUpdate[];
+  alreadyProcessed: number[];
+}
+
 export class BatchUpdater {
   private batch: BatchUpdate[] = [];
   private dbPool: any;
@@ -51,8 +57,10 @@ export class BatchUpdater {
     }, 5000);
   }
 
-  async flush(): Promise<void> {
-    if (this.batch.length === 0) return;
+  async flush(): Promise<BatchUpdateResult> {
+    if (this.batch.length === 0) {
+      return { successful: 0, failed: [], alreadyProcessed: [] };
+    }
 
     const batchToProcess = [...this.batch];
     this.batch = []; // Clear the batch immediately
@@ -64,7 +72,7 @@ export class BatchUpdater {
 
     const retryBatchUpdate = async (attempt: number = 1): Promise<any> => {
       try {
-        console.log(`[BatchUpdater] Flushing ${batchToProcess.length} IPFS CID updates... (v2)${attempt > 1 ? ` (attempt ${attempt})` : ''}`);
+        console.log(`[BatchUpdater] Writing ${batchToProcess.length} IPFS CIDs to database${attempt > 1 ? ` (attempt ${attempt})` : ''}...`);
 
         // Build the bulk update query
         const values = batchToProcess.map((update) => `(${update.flash_id}, '${update.ipfs_cid}')`).join(",");
@@ -78,7 +86,7 @@ export class BatchUpdater {
         `;
 
         const result = await this.dbPool.query(query);
-        console.log(`[BatchUpdater] ✅ Updated ${result.rowCount} records successfully`);
+        console.log(`[BatchUpdater] ✅ Successfully wrote IPFS CIDs to ${result.rowCount} database records`);
         return result;
       } catch (error) {
         const isConnectionError = error instanceof Error && 
@@ -99,64 +107,97 @@ export class BatchUpdater {
     try {
       const result = await retryBatchUpdate();
 
-      // Log any records that weren't updated
-      if (result.rowCount < batchToProcess.length) {
-        const notUpdated = batchToProcess.length - result.rowCount;
+      // Determine which records were successful vs failed
+      const allBatchIds = batchToProcess.map((u) => u.flash_id);
+      const checkResult = await this.dbPool.query("SELECT flash_id, ipfs_cid FROM flashes WHERE flash_id = ANY($1::int[])", [allBatchIds]);
 
-        // Find which specific records weren't updated and why
-        try {
-          const allBatchIds = batchToProcess.map((u) => u.flash_id);
-          const checkResult = await this.dbPool.query("SELECT flash_id, ipfs_cid FROM flashes WHERE flash_id = ANY($1::int[])", [allBatchIds]);
+      const existingRecords = new Map(checkResult.rows.map((r: any) => [r.flash_id, r.ipfs_cid]));
+      const failed: BatchUpdate[] = [];
+      const alreadyProcessed: number[] = [];
+      let successful = 0;
 
-          const existingRecords = new Map(checkResult.rows.map((r: any) => [r.flash_id, r.ipfs_cid]));
-          const missingCids: number[] = [];
-          const alreadyHaveCids: number[] = [];
-
-          for (const id of allBatchIds) {
-            if (!existingRecords.has(id)) {
-              missingCids.push(id);
-            } else if (existingRecords.get(id)) {
-              alreadyHaveCids.push(id);
-            }
-          }
-
-          // Don't log records that already have IPFS CIDs - this is expected behavior
-          if (alreadyHaveCids.length > 0) {
-            // Only log in debug mode or when there are very few
-            console.log(`[BatchUpdater] ✅ ${alreadyHaveCids.length} records skipped (already have IPFS CIDs)`);
-          }
-        } catch (checkError) {
-          console.error(`[BatchUpdater] Error checking failed records:`, checkError);
+      for (const update of batchToProcess) {
+        const existingRecord = existingRecords.get(update.flash_id);
+        
+        if (!existingRecord) {
+          // Record doesn't exist in DB - this is a failure case
+          failed.push(update);
+        } else if (existingRecord.ipfs_cid && existingRecord.ipfs_cid !== update.ipfs_cid) {
+          // Record already had a different IPFS CID - already processed
+          alreadyProcessed.push(update.flash_id);
+        } else if (existingRecord.ipfs_cid === update.ipfs_cid) {
+          // Successfully updated with our CID
+          successful++;
+        } else if (!existingRecord.ipfs_cid) {
+          // Should have been updated but wasn't - failure case
+          failed.push(update);
         }
       }
+
+      if (failed.length > 0) {
+        console.warn(`[BatchUpdater] ⚠️ ${failed.length} database updates failed and will be requeued to RabbitMQ: ${failed.map(f => f.flash_id).join(', ')}`);
+      }
+
+      if (alreadyProcessed.length > 0) {
+        console.log(`[BatchUpdater] ✅ ${alreadyProcessed.length} records skipped (already have IPFS CIDs)`);
+      }
+
+      return {
+        successful,
+        failed,
+        alreadyProcessed
+      };
+
     } catch (error) {
       console.error(`[BatchUpdater] ❌ Batch update failed:`, error);
 
-      // Fallback to individual updates for this batch
-      console.log(`[BatchUpdater] 🔄 Falling back to individual updates...`);
-      await this.fallbackIndividualUpdates(batchToProcess);
+      // If batch completely failed, try individual updates and return detailed results
+      const fallbackResult = await this.fallbackIndividualUpdates(batchToProcess);
+      return fallbackResult;
     }
   }
 
-  private async fallbackIndividualUpdates(batch: BatchUpdate[]): Promise<void> {
+  private async fallbackIndividualUpdates(batch: BatchUpdate[]): Promise<BatchUpdateResult> {
     let successful = 0;
-    let failed = 0;
+    const failed: BatchUpdate[] = [];
+    const alreadyProcessed: number[] = [];
 
     for (const update of batch) {
       try {
-        await this.dbPool.query("UPDATE flashes SET ipfs_cid = $1 WHERE flash_id = $2", [update.ipfs_cid, update.flash_id]);
-        successful++;
+        const result = await this.dbPool.query(
+          "UPDATE flashes SET ipfs_cid = $1 WHERE flash_id = $2 AND ipfs_cid IS NULL", 
+          [update.ipfs_cid, update.flash_id]
+        );
+        
+        if (result.rowCount > 0) {
+          successful++;
+        } else {
+          // Check if it already has an IPFS CID
+          const checkResult = await this.dbPool.query("SELECT ipfs_cid FROM flashes WHERE flash_id = $1", [update.flash_id]);
+          if (checkResult.rows.length > 0 && checkResult.rows[0].ipfs_cid) {
+            alreadyProcessed.push(update.flash_id);
+          } else {
+            // No record found or other issue
+            failed.push(update);
+          }
+        }
       } catch (error) {
         console.error(`[BatchUpdater] Failed individual update for flash_id ${update.flash_id}:`, error);
-        failed++;
+        failed.push(update);
       }
     }
 
-    console.log(`[BatchUpdater] Fallback complete: ${successful} successful, ${failed} failed`);
+    console.log(`[BatchUpdater] Individual database updates complete: ${successful} successful, ${failed.length} failed, ${alreadyProcessed.length} already processed`);
+    
+    return {
+      successful,
+      failed,
+      alreadyProcessed
+    };
   }
 
-  async forceFlush(): Promise<void> {
-    await this.flush();
+  async forceFlush(): Promise<BatchUpdateResult> {
+    return await this.flush();
   }
 
   getBatchSize(): number {
@@ -164,7 +205,10 @@ export class BatchUpdater {
   }
 
   async shutdown(): Promise<void> {
-    // Flush any remaining updates
-    await this.flush();
+    // Process any remaining database updates before shutdown
+    const result = await this.flush();
+    if (result.failed.length > 0) {
+      console.warn(`[BatchUpdater] Shutdown: ${result.failed.length} database updates failed during final write`);
+    }
   }
 }
