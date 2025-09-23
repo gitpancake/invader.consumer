@@ -73,7 +73,7 @@ export class BatchUpdater {
           UPDATE flashes 
           SET ipfs_cid = updates.ipfs_cid
           FROM (VALUES ${values}) AS updates(flash_id, ipfs_cid)
-          WHERE flashes.flash_id = updates.flash_id::integer
+          WHERE flashes.flash_id = updates.flash_id
           AND flashes.ipfs_cid IS NULL
         `;
 
