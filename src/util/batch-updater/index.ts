@@ -16,11 +16,16 @@ export class BatchUpdater {
 
   async addUpdate(flash_id: number, ipfs_cid: string): Promise<void> {
     // Check if this flash_id already has an IPFS CID to avoid race conditions
-    const existingCheck = await this.dbPool.query("SELECT ipfs_cid FROM flashes WHERE flash_id = $1", [flash_id]);
+    try {
+      const existingCheck = await this.dbPool.query("SELECT ipfs_cid FROM flashes WHERE flash_id = $1", [flash_id]);
 
-    if (existingCheck.rows.length > 0 && existingCheck.rows[0].ipfs_cid) {
-      // Already has IPFS CID, skip adding to batch
-      return;
+      if (existingCheck.rows.length > 0 && existingCheck.rows[0].ipfs_cid) {
+        // Already has IPFS CID, skip adding to batch
+        return;
+      }
+    } catch (dbError) {
+      console.error(`[BatchUpdater] Database error checking existing CID for flash ${flash_id}:`, dbError);
+      // Continue adding to batch even if check fails - update will handle duplicates
     }
 
     this.batch.push({ flash_id, ipfs_cid });
@@ -57,22 +62,42 @@ export class BatchUpdater {
       this.flushTimer = null;
     }
 
+    const retryBatchUpdate = async (attempt: number = 1): Promise<any> => {
+      try {
+        console.log(`[BatchUpdater] Flushing ${batchToProcess.length} IPFS CID updates... (v2)${attempt > 1 ? ` (attempt ${attempt})` : ''}`);
+
+        // Build the bulk update query
+        const values = batchToProcess.map((update) => `(${update.flash_id}, '${update.ipfs_cid}')`).join(",");
+
+        const query = `
+          UPDATE flashes 
+          SET ipfs_cid = updates.ipfs_cid
+          FROM (VALUES ${values}) AS updates(flash_id, ipfs_cid)
+          WHERE flashes.flash_id = updates.flash_id::integer
+          AND flashes.ipfs_cid IS NULL
+        `;
+
+        const result = await this.dbPool.query(query);
+        console.log(`[BatchUpdater] ✅ Updated ${result.rowCount} records successfully`);
+        return result;
+      } catch (error) {
+        const isConnectionError = error instanceof Error && 
+          (error.message.includes('Connection terminated') || 
+           error.message.includes('ECONNRESET') ||
+           error.message.includes('connection timeout') ||
+           error.message.includes('connection pool'));
+        
+        if (isConnectionError && attempt < 3) {
+          console.log(`[BatchUpdater] Database connection error, retrying in ${attempt * 2}s (attempt ${attempt}/3)...`);
+          await new Promise(resolve => setTimeout(resolve, attempt * 2000));
+          return retryBatchUpdate(attempt + 1);
+        }
+        throw error;
+      }
+    };
+
     try {
-      console.log(`[BatchUpdater] Flushing ${batchToProcess.length} IPFS CID updates... (v2)`);
-
-      // Build the bulk update query
-      const values = batchToProcess.map((update) => `(${update.flash_id}, '${update.ipfs_cid}')`).join(",");
-
-      const query = `
-        UPDATE flashes 
-        SET ipfs_cid = updates.ipfs_cid
-        FROM (VALUES ${values}) AS updates(flash_id, ipfs_cid)
-        WHERE flashes.flash_id = updates.flash_id::integer
-        AND flashes.ipfs_cid IS NULL
-      `;
-
-      const result = await this.dbPool.query(query);
-      console.log(`[BatchUpdater] ✅ Updated ${result.rowCount} records successfully`);
+      const result = await retryBatchUpdate();
 
       // Log any records that weren't updated
       if (result.rowCount < batchToProcess.length) {

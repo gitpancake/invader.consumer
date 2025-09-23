@@ -12,20 +12,37 @@ export function getPool(): Pool {
     pool = new Pool({
       connectionString,
       ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
-      max: 20, // Increased from 10 to handle burst traffic
-      idleTimeoutMillis: 60000, // Increased from 30s to 60s
-      connectionTimeoutMillis: 5000, // Increased from 2s to 5s
-      keepAlive: true, // Keep connections alive
-      keepAliveInitialDelayMillis: 10000,
+      max: 15, // Reduced to prevent overwhelming Railway
+      min: 2, // Maintain minimum connections
+      idleTimeoutMillis: 30000, // Shorter idle timeout for Railway
+      connectionTimeoutMillis: 10000, // Longer connection timeout
+      keepAlive: true, 
+      keepAliveInitialDelayMillis: 0, // Start keepalive immediately
+      // Resilience settings for Railway
+      statement_timeout: 30000, // 30 second query timeout
+      query_timeout: 30000,
+      // Connection retry settings
+      application_name: 'invaders-consumer',
     });
     
-    // Add error handling for the pool
-    pool.on('error', (err) => {
-      console.error('Database pool error:', err);
+    // Enhanced error handling with reconnection logic
+    pool.on('error', (err, client) => {
+      console.error('Database pool error:', err.message);
+      // Don't exit on connection errors - let pool handle reconnection
+      if (err.message.includes('Connection terminated') || err.message.includes('ECONNRESET')) {
+        console.log('Database connection lost - pool will reconnect automatically');
+      }
+    });
+
+    pool.on('connect', (client) => {
+      console.log('New database connection established');
+    });
+
+    pool.on('remove', (client) => {
+      console.log('Database connection removed from pool');
     });
     
-    // Log only once when pool is created, not on every connection
-    console.log('Database connection pool initialized (max: 20 connections)');
+    console.log('Database connection pool initialized with resilience settings (max: 15 connections)');
   }
   return pool;
 }

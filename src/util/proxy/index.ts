@@ -140,12 +140,14 @@ export class ProxyRotator {
       
       const agent = new HttpsProxyAgent(proxyUrl);
       
-      // Test with a simple API endpoint (not our target to avoid rate limiting during health checks)
-      const testUrl = 'https://httpbin.org/get';
+      // For DataImpulse/OxyLabs proxies, test with a simpler endpoint
+      const testUrl = this.isOxylabs ? 
+        'https://api.space-invaders.com/flashinvaders/' : 
+        'https://httpbin.org/get';
       
       const response = await axios.get(testUrl, {
         httpsAgent: agent,
-        timeout: 15000, // Increased timeout for OxLabs
+        timeout: 20000, // Longer timeout for premium proxies
         validateStatus: (status) => status < 500, // Accept 4xx but not 5xx
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'

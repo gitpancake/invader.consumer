@@ -133,7 +133,11 @@ class FlashConsumer extends RabbitMQBaseConsumer {
   private dbPool: any;
   public batchUpdater: BatchUpdater; // Make public for shutdown access
   private consecutiveApiFailures: number = 0;
-  private readonly MAX_API_FAILURES = 20; // Crash after 20 consecutive API failures
+  private consecutiveIPFSFailures: number = 0;
+  private readonly MAX_API_FAILURES = 50; // Increased threshold before crashing
+  private readonly MAX_IPFS_FAILURES = 30; // Separate threshold for IPFS failures
+  private ipfsCircuitBreakerOpen: boolean = false;
+  private ipfsCircuitBreakerOpenUntil: number = 0;
 
   constructor() {
     super();
@@ -144,9 +148,41 @@ class FlashConsumer extends RabbitMQBaseConsumer {
   }
 
   protected shouldRequeueOnFailure(error: Error): boolean {
-    // Always requeue failed messages to retry later
-    console.log(`[FlashConsumer] Message failed: ${error.message} - will requeue for retry`);
+    const errorMsg = error.message.toLowerCase();
+    
+    // Don't requeue if it's a permanent error
+    if (errorMsg.includes('flash already has ipfs') || 
+        errorMsg.includes('already processed') ||
+        errorMsg.includes('duplicate')) {
+      console.log(`[FlashConsumer] Permanent error - not requeuing: ${error.message}`);
+      return false;
+    }
+    
+    // Don't requeue if we're in circuit breaker mode for too long
+    if (this.ipfsCircuitBreakerOpen && Date.now() < this.ipfsCircuitBreakerOpenUntil + 600000) { // 10 minutes
+      console.log(`[FlashConsumer] Circuit breaker open - not requeuing: ${error.message}`);
+      return false;
+    }
+    
+    // Requeue for transient errors
+    console.log(`[FlashConsumer] Transient error - will requeue for retry: ${error.message}`);
     return true;
+  }
+
+  private isIPFSCircuitBreakerOpen(): boolean {
+    if (this.ipfsCircuitBreakerOpen && Date.now() > this.ipfsCircuitBreakerOpenUntil) {
+      // Circuit breaker timeout expired, reset it
+      this.ipfsCircuitBreakerOpen = false;
+      this.consecutiveIPFSFailures = 0;
+      console.log(`[FlashConsumer] 🔄 IPFS circuit breaker reset - attempting recovery`);
+    }
+    return this.ipfsCircuitBreakerOpen;
+  }
+
+  private openIPFSCircuitBreaker(): void {
+    this.ipfsCircuitBreakerOpen = true;
+    this.ipfsCircuitBreakerOpenUntil = Date.now() + 300000; // 5 minutes
+    console.log(`[FlashConsumer] ⚠️ IPFS circuit breaker OPEN for 5 minutes due to ${this.consecutiveIPFSFailures} consecutive failures`);
   }
 
   protected async handleMessage(msg: ConsumeMessage): Promise<void> {
@@ -158,14 +194,28 @@ class FlashConsumer extends RabbitMQBaseConsumer {
     try {
       // Check if this flash already has an IPFS CID to avoid duplicate processing
       const pool = getPool();
-      const existingCheck = await pool.query(
-        'SELECT ipfs_cid FROM flashes WHERE flash_id = $1',
-        [flash.flash_id]
-      );
+      let existingCheck;
+      
+      try {
+        existingCheck = await pool.query(
+          'SELECT ipfs_cid FROM flashes WHERE flash_id = $1',
+          [flash.flash_id]
+        );
+      } catch (dbError) {
+        console.log(`[FlashConsumer] Database error checking existing flash ${flash.flash_id}: ${dbError instanceof Error ? dbError.message : dbError}`);
+        // If DB is down, requeue the message for later
+        throw new Error(`Database connection failed: ${dbError instanceof Error ? dbError.message : 'Unknown error'}`);
+      }
       
       if (existingCheck.rows.length > 0 && existingCheck.rows[0].ipfs_cid) {
         // Already has IPFS CID, skip processing
+        console.log(`[FlashConsumer] Flash ${flash.flash_id} already has IPFS CID, skipping`);
         return;
+      }
+
+      // Check circuit breaker before attempting IPFS
+      if (this.isIPFSCircuitBreakerOpen()) {
+        throw new Error(`IPFS circuit breaker is open - skipping flash ${flash.flash_id}`);
       }
       // Apply rate limiting first
       await processingRateLimiter.waitIfNeeded();
@@ -259,9 +309,19 @@ class FlashConsumer extends RabbitMQBaseConsumer {
         // Retry IPFS upload with longer backoff during migration period
         cid = await retryRequest(uploadToIPFS, 5, 10000); // 5 retries, 10 second base delay for migration period
         ipfsSuccess = true;
+        
+        // Reset consecutive failure counters on success
+        this.consecutiveIPFSFailures = 0;
       } catch (ipfsError) {
         const errorMsg = ipfsError instanceof Error ? ipfsError.message : "Unknown error";
         console.error(`[${new Date().toISOString()}] [FlashConsumer] ❌ IPFS upload failed after retries: ${errorMsg}`);
+        
+        // Track consecutive IPFS failures for circuit breaker
+        this.consecutiveIPFSFailures++;
+        
+        if (this.consecutiveIPFSFailures >= this.MAX_IPFS_FAILURES) {
+          this.openIPFSCircuitBreaker();
+        }
       }
 
       // Add to batch updater if IPFS was successful
@@ -270,6 +330,16 @@ class FlashConsumer extends RabbitMQBaseConsumer {
           await this.batchUpdater.addUpdate(flash.flash_id, cid);
         } catch (batchError) {
           console.error(`[FlashConsumer] ❌ Batch update failed:`, batchError instanceof Error ? batchError.message : batchError);
+          // If batch update fails due to DB issues, we still want to continue processing
+          // The flash will be retried later if needed
+          const isDbError = batchError instanceof Error && 
+            (batchError.message.includes('Connection terminated') || 
+             batchError.message.includes('ECONNRESET') ||
+             batchError.message.includes('connection timeout'));
+          
+          if (isDbError) {
+            throw new Error(`Database batch update failed: ${batchError instanceof Error ? batchError.message : batchError}`);
+          }
         }
       }
 
