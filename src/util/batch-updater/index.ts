@@ -86,7 +86,7 @@ export class BatchUpdater {
           SET ipfs_cid = updates.ipfs_cid
           FROM (VALUES ${values}) AS updates(flash_id, ipfs_cid)
           WHERE flashes.flash_id = updates.flash_id
-          AND flashes.ipfs_cid IS NULL
+          AND (flashes.ipfs_cid IS NULL OR flashes.ipfs_cid = '')
         `;
 
         const result = await this.dbPool.query(query);
