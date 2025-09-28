@@ -33,7 +33,10 @@ export function getPool(): Pool {
       console.error('Database pool error:', err.message);
       // Don't exit on connection errors - let pool handle reconnection
       if (err.message.includes('Connection terminated') || err.message.includes('ECONNRESET')) {
-        console.log('Database connection lost - pool will reconnect automatically');
+        console.warn('Database connection lost - pool will reconnect automatically');
+      } else {
+        // Log non-connection errors more prominently
+        console.error('Critical database pool error:', err);
       }
     });
 

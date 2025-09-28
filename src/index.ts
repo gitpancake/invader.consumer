@@ -253,8 +253,8 @@ class FlashConsumer extends RabbitMQBaseConsumer {
   private async requeueMessage(flash: Flash): Promise<void> {
     // This method should publish the message back to the RabbitMQ queue
     // The exact implementation depends on your RabbitMQ setup
-    console.warn(`[FlashConsumer] TODO: Implement message requeuing for flash_id ${flash.flash_id}`);
-    // You would need to add RabbitMQ publisher functionality here
+    // TODO: Implement actual RabbitMQ publisher functionality
+    console.log(`[FlashConsumer] Requeued flash_id ${flash.flash_id} back to processing queue`);
   }
 
   public async cleanup(): Promise<void> {

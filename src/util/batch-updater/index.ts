@@ -99,7 +99,7 @@ export class BatchUpdater {
         `;
 
         const result = await this.dbPool.query(query, [flashIds, ipfsCids]);
-        console.log(`[BatchUpdater] ✅ Successfully wrote IPFS CIDs to ${result.rowCount} database records`);
+        // Don't log success here - wait for verification to avoid misleading logs
         return result;
       } catch (error) {
         const isConnectionError = error instanceof Error && 
@@ -123,6 +123,11 @@ export class BatchUpdater {
       // Process results in memory-efficient chunks to avoid loading all data at once
       const processResult = await this.processResultsInChunks(batchToProcess);
       const { successful, failed, alreadyProcessed } = processResult;
+
+      // Log accurate results after verification
+      if (successful > 0) {
+        console.log(`[BatchUpdater] ✅ Successfully verified ${successful} IPFS CID updates in database`);
+      }
 
       if (failed.length > 0) {
         console.warn(`[BatchUpdater] ⚠️ ${failed.length} database updates failed and will be requeued to RabbitMQ: ${failed.map((f: BatchUpdate) => f.flash_id).join(', ')}`);
