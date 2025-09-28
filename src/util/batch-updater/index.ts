@@ -19,9 +19,12 @@ export class BatchUpdater {
   private batchSize: number;
   private flushTimer: NodeJS.Timeout | null = null;
 
-  constructor(dbPool: any, batchSize: number = 600) {
+  constructor(dbPool: any, batchSize: number = 300) {
     this.dbPool = dbPool;
-    this.batchSize = batchSize;
+    // Adjust batch size based on environment and available memory
+    this.batchSize = process.env.NODE_ENV === 'production'
+      ? Math.min(batchSize, 300) // Cap at 300 in production for memory efficiency
+      : batchSize;
   }
 
   async addUpdate(flash_id: number, ipfs_cid: string): Promise<void> {
@@ -78,18 +81,21 @@ export class BatchUpdater {
       try {
         console.log(`[BatchUpdater] Writing ${batchToProcess.length} IPFS CIDs to database${attempt > 1 ? ` (attempt ${attempt})` : ''}...`);
 
-        // Build the bulk update query
-        const values = batchToProcess.map((update) => `(${update.flash_id}, '${update.ipfs_cid}')`).join(",");
+        // Use parameterized queries instead of string concatenation for memory efficiency
+        const flashIds = batchToProcess.map(u => u.flash_id);
+        const ipfsCids = batchToProcess.map(u => u.ipfs_cid);
 
         const query = `
-          UPDATE flashes 
-          SET ipfs_cid = updates.ipfs_cid
-          FROM (VALUES ${values}) AS updates(flash_id, ipfs_cid)
-          WHERE flashes.flash_id = updates.flash_id
+          UPDATE flashes
+          SET ipfs_cid = data.ipfs_cid
+          FROM (
+            SELECT UNNEST($1::int[]) AS flash_id, UNNEST($2::text[]) AS ipfs_cid
+          ) AS data
+          WHERE flashes.flash_id = data.flash_id
           AND (flashes.ipfs_cid IS NULL OR flashes.ipfs_cid = '')
         `;
 
-        const result = await this.dbPool.query(query);
+        const result = await this.dbPool.query(query, [flashIds, ipfsCids]);
         console.log(`[BatchUpdater] ✅ Successfully wrote IPFS CIDs to ${result.rowCount} database records`);
         return result;
       } catch (error) {
@@ -109,37 +115,14 @@ export class BatchUpdater {
     };
 
     try {
-      const result = await retryBatchUpdate();
+      await retryBatchUpdate();
 
-      // Determine which records were successful vs failed
-      const allBatchIds = batchToProcess.map((u) => u.flash_id);
-      const checkResult = await this.dbPool.query("SELECT flash_id, ipfs_cid FROM flashes WHERE flash_id = ANY($1::int[])", [allBatchIds]);
-
-      const existingRecords = new Map<number, FlashRecord>(checkResult.rows.map((r: any) => [r.flash_id, { ipfs_cid: r.ipfs_cid }]));
-      const failed: BatchUpdate[] = [];
-      const alreadyProcessed: number[] = [];
-      let successful = 0;
-
-      for (const update of batchToProcess) {
-        const existingRecord = existingRecords.get(update.flash_id);
-        
-        if (!existingRecord) {
-          // Record doesn't exist in DB - this is a failure case
-          failed.push(update);
-        } else if (existingRecord.ipfs_cid && existingRecord.ipfs_cid !== update.ipfs_cid) {
-          // Record already had a different IPFS CID - already processed
-          alreadyProcessed.push(update.flash_id);
-        } else if (existingRecord.ipfs_cid === update.ipfs_cid) {
-          // Successfully updated with our CID
-          successful++;
-        } else if (!existingRecord.ipfs_cid) {
-          // Should have been updated but wasn't - failure case
-          failed.push(update);
-        }
-      }
+      // Process results in memory-efficient chunks to avoid loading all data at once
+      const processResult = await this.processResultsInChunks(batchToProcess);
+      const { successful, failed, alreadyProcessed } = processResult;
 
       if (failed.length > 0) {
-        console.warn(`[BatchUpdater] ⚠️ ${failed.length} database updates failed and will be requeued to RabbitMQ: ${failed.map(f => f.flash_id).join(', ')}`);
+        console.warn(`[BatchUpdater] ⚠️ ${failed.length} database updates failed and will be requeued to RabbitMQ: ${failed.map((f: BatchUpdate) => f.flash_id).join(', ')}`);
       }
 
       if (alreadyProcessed.length > 0) {
@@ -159,6 +142,54 @@ export class BatchUpdater {
       const fallbackResult = await this.fallbackIndividualUpdates(batchToProcess);
       return fallbackResult;
     }
+  }
+
+  private async processResultsInChunks(batchToProcess: BatchUpdate[], chunkSize: number = 100): Promise<{ successful: number; failed: BatchUpdate[]; alreadyProcessed: number[] }> {
+    const failed: BatchUpdate[] = [];
+    const alreadyProcessed: number[] = [];
+    let successful = 0;
+
+    // Process results in chunks to reduce memory footprint
+    for (let i = 0; i < batchToProcess.length; i += chunkSize) {
+      const chunk = batchToProcess.slice(i, i + chunkSize);
+      const chunkIds = chunk.map(u => u.flash_id);
+
+      try {
+        const checkResult = await this.dbPool.query(
+          "SELECT flash_id, ipfs_cid FROM flashes WHERE flash_id = ANY($1::int[])",
+          [chunkIds]
+        );
+
+        const existingRecords = new Map<number, FlashRecord>(
+          checkResult.rows.map((r: any) => [r.flash_id, { ipfs_cid: r.ipfs_cid }])
+        );
+
+        // Process this chunk
+        for (const update of chunk) {
+          const existingRecord = existingRecords.get(update.flash_id);
+
+          if (!existingRecord) {
+            // Record doesn't exist in DB - this is a failure case
+            failed.push(update);
+          } else if (existingRecord.ipfs_cid && existingRecord.ipfs_cid !== '' && existingRecord.ipfs_cid !== update.ipfs_cid) {
+            // Record already had a different IPFS CID - already processed, don't requeue
+            alreadyProcessed.push(update.flash_id);
+          } else if (existingRecord.ipfs_cid === update.ipfs_cid) {
+            // Successfully updated with our CID
+            successful++;
+          } else if (!existingRecord.ipfs_cid || existingRecord.ipfs_cid === '') {
+            // Should have been updated but wasn't - failure case (only if no ipfs_cid)
+            failed.push(update);
+          }
+        }
+      } catch (error) {
+        console.error(`[BatchUpdater] Error processing chunk starting at index ${i}:`, error);
+        // Mark entire chunk as failed
+        failed.push(...chunk);
+      }
+    }
+
+    return { successful, failed, alreadyProcessed };
   }
 
   private async fallbackIndividualUpdates(batch: BatchUpdate[]): Promise<BatchUpdateResult> {

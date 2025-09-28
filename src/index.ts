@@ -144,8 +144,8 @@ class FlashConsumer extends RabbitMQBaseConsumer {
     super();
     // Initialize database connection pool early
     this.dbPool = getPool();
-    // Initialize batch updater for efficient database updates
-    this.batchUpdater = new BatchUpdater(this.dbPool, 600);
+    // Initialize batch updater with memory-optimized batch size
+    this.batchUpdater = new BatchUpdater(this.dbPool, 300);
     
     // Start periodic batch result checking
     this.startBatchResultMonitoring();
