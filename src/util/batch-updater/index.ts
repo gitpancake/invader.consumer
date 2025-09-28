@@ -79,7 +79,10 @@ export class BatchUpdater {
 
     const retryBatchUpdate = async (attempt: number = 1): Promise<any> => {
       try {
-        console.log(`[BatchUpdater] Writing ${batchToProcess.length} IPFS CIDs to database${attempt > 1 ? ` (attempt ${attempt})` : ''}...`);
+        // Only log batch operations in development or on retries
+        if (process.env.NODE_ENV !== 'production' || attempt > 1) {
+          console.log(`[BatchUpdater] Writing ${batchToProcess.length} IPFS CIDs to database${attempt > 1 ? ` (attempt ${attempt})` : ''}...`);
+        }
 
         // Use parameterized queries instead of string concatenation for memory efficiency
         const flashIds = batchToProcess.map(u => u.flash_id);
@@ -96,7 +99,10 @@ export class BatchUpdater {
         `;
 
         const result = await this.dbPool.query(query, [flashIds, ipfsCids]);
-        console.log(`[BatchUpdater] ✅ Successfully wrote IPFS CIDs to ${result.rowCount} database records`);
+        // Only log successful batch writes in development
+        if (process.env.NODE_ENV !== 'production') {
+          console.log(`[BatchUpdater] ✅ Successfully wrote IPFS CIDs to ${result.rowCount} database records`);
+        }
         return result;
       } catch (error) {
         const isConnectionError = error instanceof Error && 
@@ -126,7 +132,10 @@ export class BatchUpdater {
       }
 
       if (alreadyProcessed.length > 0) {
-        console.log(`[BatchUpdater] ✅ ${alreadyProcessed.length} records skipped (already have IPFS CIDs)`);
+        // Only log skipped records in development
+        if (process.env.NODE_ENV !== 'production' && alreadyProcessed.length > 0) {
+          console.log(`[BatchUpdater] ✅ ${alreadyProcessed.length} records skipped (already have IPFS CIDs)`);
+        }
       }
 
       return {
@@ -222,7 +231,10 @@ export class BatchUpdater {
       }
     }
 
-    console.log(`[BatchUpdater] Individual database updates complete: ${successful} successful, ${failed.length} failed, ${alreadyProcessed.length} already processed`);
+    // Only log individual update summary in development
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[BatchUpdater] Individual database updates complete: ${successful} successful, ${failed.length} failed, ${alreadyProcessed.length} already processed`);
+    }
     
     return {
       successful,

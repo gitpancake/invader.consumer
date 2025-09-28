@@ -37,23 +37,27 @@ export function getPool(): Pool {
       }
     });
 
-    pool.on('connect', (client) => {
-      console.log('New database connection established');
-    });
+    // Only log significant connection events in production
+    if (process.env.NODE_ENV !== 'production') {
+      pool.on('connect', (client) => {
+        console.log('New database connection established');
+      });
 
-    pool.on('acquire', (client) => {
-      console.debug(`Connection acquired. Pool size: ${pool!.totalCount}, idle: ${pool!.idleCount}`);
-    });
+      pool.on('remove', (client) => {
+        console.log('Database connection removed from pool');
+      });
+    }
 
-    pool.on('remove', (client) => {
-      console.log('Database connection removed from pool');
-    });
+    // Always log pool errors
+    // (error handler already exists above)
 
-    // Implement periodic cleanup for memory efficiency
+    // Implement periodic cleanup for memory efficiency (silent in production)
     if (!cleanupInterval) {
       cleanupInterval = setInterval(() => {
         if (pool && pool.idleCount > pool.options.min!) {
-          console.log(`[Database] Performing periodic cleanup - idle: ${pool.idleCount}, min: ${pool.options.min}`);
+          if (process.env.NODE_ENV !== 'production') {
+            console.log(`[Database] Performing periodic cleanup - idle: ${pool.idleCount}, min: ${pool.options.min}`);
+          }
           // Note: In production, you might want to implement a more sophisticated cleanup strategy
         }
       }, 300000); // Every 5 minutes
