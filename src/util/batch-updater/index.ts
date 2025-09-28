@@ -99,10 +99,7 @@ export class BatchUpdater {
         `;
 
         const result = await this.dbPool.query(query, [flashIds, ipfsCids]);
-        // Only log successful batch writes in development
-        if (process.env.NODE_ENV !== 'production') {
-          console.log(`[BatchUpdater] ✅ Successfully wrote IPFS CIDs to ${result.rowCount} database records`);
-        }
+        console.log(`[BatchUpdater] ✅ Successfully wrote IPFS CIDs to ${result.rowCount} database records`);
         return result;
       } catch (error) {
         const isConnectionError = error instanceof Error && 
