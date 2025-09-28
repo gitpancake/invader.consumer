@@ -24,12 +24,6 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsc --watch & nodemon dist/index.js",
-    "test": "TEST_MODE=true node dist/index.js",
-    "migrate": "tsc && node dist/scripts/migrate-s3-to-ipfs.js",
-    "migrate:batch": "tsc && node dist/scripts/migrate-s3-to-ipfs.js",
-    "migrate:parallel": "tsc && node dist/scripts/parallel-migration.js",
-    "backfill": "tsc && node dist/scripts/backfill-ipfs.js",
-    "test-upload": "tsc && node dist/scripts/test-dual-upload.js",
-    "generate-web3-csv": "node -e \"const {CSVLogger} = require('./dist/util/csv-logger'); console.log('Generated:', CSVLogger.generateWeb3StorageCSV());\""
+    "test": "TEST_MODE=true node dist/index.js"
   }
 }
