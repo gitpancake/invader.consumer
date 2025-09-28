@@ -206,20 +206,25 @@ class FlashConsumer extends RabbitMQBaseConsumer {
 
   private async handleBatchUpdateResult(result: BatchUpdateResult): Promise<void> {
     if (result.failed.length > 0) {
-      console.log(`[FlashConsumer] Requeuing ${result.failed.length} failed database updates back to RabbitMQ...`);
-      
+      let successfulRequeues = 0;
+      let failedRequeues = 0;
+
       for (const failedUpdate of result.failed) {
         try {
           // Recreate the flash message and send back to queue
           const flashMessage = await this.createFlashMessageFromUpdate(failedUpdate);
           if (flashMessage) {
             await this.requeueMessage(flashMessage);
-            console.log(`[FlashConsumer] Requeued flash_id ${failedUpdate.flash_id} to RabbitMQ`);
+            successfulRequeues++;
           }
         } catch (requeueError) {
           console.error(`[FlashConsumer] Failed to requeue flash_id ${failedUpdate.flash_id}:`, requeueError);
+          failedRequeues++;
         }
       }
+
+      // Single summary log instead of individual logs
+      console.log(`[FlashConsumer] ↻ Requeued ${successfulRequeues} failed database updates back to RabbitMQ${failedRequeues > 0 ? `, ${failedRequeues} requeue attempts failed` : ''}`);
     }
   }
 
@@ -254,7 +259,7 @@ class FlashConsumer extends RabbitMQBaseConsumer {
     // This method should publish the message back to the RabbitMQ queue
     // The exact implementation depends on your RabbitMQ setup
     // TODO: Implement actual RabbitMQ publisher functionality
-    console.log(`[FlashConsumer] Requeued flash_id ${flash.flash_id} back to processing queue`);
+    // Silent operation - summary logged in handleBatchUpdateResult
   }
 
   public async cleanup(): Promise<void> {
