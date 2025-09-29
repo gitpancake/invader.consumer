@@ -194,7 +194,7 @@ class FlashConsumer extends RabbitMQBaseConsumer {
     this.batchResultCheckInterval = setInterval(async () => {
       try {
         if (this.batchUpdater.getBatchSize() > 0) {
-          console.log(`[FlashConsumer] Checking batch results - ${this.batchUpdater.getBatchSize()} pending database updates...`);
+          // Checking batch results silently
           const result = await this.batchUpdater.forceFlush();
           await this.handleBatchUpdateResult(result);
         }
@@ -224,7 +224,7 @@ class FlashConsumer extends RabbitMQBaseConsumer {
       }
 
       // Single summary log instead of individual logs
-      console.log(`[FlashConsumer] ↻ Requeued ${successfulRequeues} failed database updates back to RabbitMQ${failedRequeues > 0 ? `, ${failedRequeues} requeue attempts failed` : ''}`);
+      // Requeued failed updates silently
     }
   }
 
@@ -288,14 +288,14 @@ class FlashConsumer extends RabbitMQBaseConsumer {
           [flash.flash_id]
         );
       } catch (dbError) {
-        console.log(`[FlashConsumer] Database error checking existing flash ${flash.flash_id}: ${dbError instanceof Error ? dbError.message : dbError}`);
+        // Database check error - continue processing
         // If DB is down, requeue the message for later
         throw new Error(`Database connection failed: ${dbError instanceof Error ? dbError.message : 'Unknown error'}`);
       }
       
       if (existingCheck.rows.length > 0 && existingCheck.rows[0].ipfs_cid) {
         // Already has IPFS CID, skip processing
-        console.log(`[FlashConsumer] Flash ${flash.flash_id} already has IPFS CID, skipping`);
+        // Flash already has IPFS CID, skip silently
         return;
       }
 
@@ -454,9 +454,9 @@ class FlashConsumer extends RabbitMQBaseConsumer {
   const testMode = process.env.TEST_MODE === "true";
   
   // Debug environment variables
-  console.log(`[FlashConsumer] Debug: PROXY_LIST = ${process.env.PROXY_LIST ? '[SET]' : '[NOT SET]'}`);
+  // Proxy configuration detected
   if (process.env.PROXY_LIST) {
-    console.log(`[FlashConsumer] Debug: Proxy host = ${process.env.PROXY_LIST.split('@')[1] || 'unknown'}`);
+    // Proxy host configured
   }
   
   // Initialize proxy health checks BEFORE starting processing

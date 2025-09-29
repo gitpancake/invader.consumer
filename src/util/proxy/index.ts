@@ -36,9 +36,10 @@ export class ProxyRotator {
 
   public async initialize(): Promise<void> {
     if (this.proxies.length > 0 && !this.healthCheckInProgress) {
-      // For OxLabs, skip health checks since they handle failures internally and may have domain-specific auth
+      // For premium proxy services, skip health checks since they handle failures internally
       if (this.isOxylabs) {
-        console.log(`[ProxyRotator] 🔗 OxLabs detected - skipping health checks (they handle failures internally)`);
+        const serviceType = this.proxies.some(p => p.host.includes('oxylabs.io')) ? 'OxyLabs' : 'DataImpulse';
+        console.log(`[ProxyRotator] 🔗 ${serviceType} detected - skipping health checks (they handle failures internally)`);
         this.workingProxies = [...this.proxies]; // Copy all proxies to working pool
         return;
       }
