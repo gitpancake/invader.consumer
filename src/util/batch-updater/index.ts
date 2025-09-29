@@ -223,7 +223,8 @@ export class BatchUpdater {
       } catch (error) {
         console.error(`[BatchUpdater] Error processing chunk starting at index ${i}:`, error);
         // Mark entire chunk as failed with database error reason
-        failed.push(...chunk.map(update => ({ ...update, reason: `Database error: ${error.message}` })));
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        failed.push(...chunk.map(update => ({ ...update, reason: `Database error: ${errorMessage}` })));
       }
     }
 
@@ -256,7 +257,8 @@ export class BatchUpdater {
         }
       } catch (error) {
         console.error(`[BatchUpdater] Failed individual update for flash_id ${update.flash_id}:`, error);
-        failed.push({ ...update, reason: `Database error: ${error.message}` });
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        failed.push({ ...update, reason: `Database error: ${errorMessage}` });
       }
     }
 
