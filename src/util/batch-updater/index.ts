@@ -198,6 +198,10 @@ export class BatchUpdater {
           [chunkIds]
         );
 
+        // Debug logging to see what the SELECT actually returns
+        console.log(`[${new Date().toISOString()}] [BatchUpdater] Verification query searched for: ${chunkIds.join(', ')}`);
+        console.log(`[${new Date().toISOString()}] [BatchUpdater] Verification query found: ${checkResult.rows.length} records - ${checkResult.rows.map((r: any) => `${r.flash_id}:${r.ipfs_cid || 'NULL'}`).join(', ')}`);
+
         const existingRecords = new Map<number, FlashRecord>(
           checkResult.rows.map((r: any) => [r.flash_id, { ipfs_cid: r.ipfs_cid }])
         );
@@ -208,6 +212,7 @@ export class BatchUpdater {
 
           if (!existingRecord) {
             // Record doesn't exist in DB - this is a failure case
+            console.log(`[${new Date().toISOString()}] [BatchUpdater] DEBUG: flash_id ${update.flash_id} not found in verification results. Available flash_ids: ${checkResult.rows.map((r: any) => r.flash_id).join(', ')}`);
             failed.push({ ...update, reason: 'Record not found in database' });
           } else if (existingRecord.ipfs_cid && existingRecord.ipfs_cid !== '' && existingRecord.ipfs_cid !== update.ipfs_cid) {
             // Record already had a different IPFS CID - already processed, don't requeue
