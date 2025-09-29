@@ -29,7 +29,7 @@ export abstract class RabbitMQBaseConsumer {
     await channel.assertQueue(this.queue, { durable: true });
     
     // Set prefetch for concurrent processing - DataImpulse supports up to 2000 threads
-    const prefetchCount = parseInt(process.env.CONSUMER_CONCURRENCY || '10');
+    const prefetchCount = parseInt(process.env.CONSUMER_CONCURRENCY || '1');
     await channel.prefetch(prefetchCount);
     
     if (testMode) {
