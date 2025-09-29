@@ -85,9 +85,9 @@ export class BatchUpdater {
 
     const retryBatchUpdate = async (attempt: number = 1): Promise<any> => {
       try {
-        // Only log batch operations in development or on retries
-        if (process.env.NODE_ENV !== 'production' || attempt > 1) {
-          console.log(`[${new Date().toISOString()}] [BatchUpdater] Writing ${batchToProcess.length} IPFS CIDs to database${attempt > 1 ? ` (attempt ${attempt})` : ''}...`);
+        // Only log retries, initial processing is logged elsewhere
+        if (attempt > 1) {
+          console.log(`[${new Date().toISOString()}] [BatchUpdater] Retrying ${batchToProcess.length} IPFS upload${batchToProcess.length === 1 ? '' : 's'} (attempt ${attempt})`);
         }
 
         // Use parameterized queries instead of string concatenation for memory efficiency
@@ -105,10 +105,8 @@ export class BatchUpdater {
         `;
 
         const result = await this.dbPool.query(query, [flashIds, ipfsCids]);
-        // Log the number of rows affected for debugging
-        if (process.env.NODE_ENV !== 'production' || result.rowCount === 0) {
-          console.log(`[${new Date().toISOString()}] [BatchUpdater] UPDATE query affected ${result.rowCount} rows out of ${batchToProcess.length} attempted`);
-        }
+        // Log concise update info
+        console.log(`[${new Date().toISOString()}] [BatchUpdater] Processing ${batchToProcess.length} IPFS upload${batchToProcess.length === 1 ? '' : 's'} for flash${batchToProcess.length === 1 ? '' : 'es'}: ${batchToProcess.map(u => u.flash_id).join(', ')}`);
         return result;
       } catch (error) {
         const isConnectionError = error instanceof Error && 
@@ -133,9 +131,20 @@ export class BatchUpdater {
       const processResult = await this.processResultsInChunks(batchToProcess);
       const { successful, failed, alreadyProcessed } = processResult;
 
-      // Log accurate results after verification
+      // Log accurate results after verification with specific flash_ids
       if (successful > 0) {
-        console.log(`[${new Date().toISOString()}] [BatchUpdater] ✅ Successfully verified ${successful} IPFS CID updates in database`);
+        const successfulIds = batchToProcess.filter((_, index) => {
+          // Get successful flash_ids by checking which ones weren't in failed or alreadyProcessed
+          const wasAlreadyProcessed = alreadyProcessed.includes(batchToProcess[index].flash_id);
+          const wasFailed = failed.some(f => f.flash_id === batchToProcess[index].flash_id);
+          return !wasAlreadyProcessed && !wasFailed;
+        }).map(u => u.flash_id);
+
+        if (successfulIds.length === 1) {
+          console.log(`[${new Date().toISOString()}] [BatchUpdater] ✅ Successfully verified ${successfulIds[0]} with upload to IPFS in database`);
+        } else if (successfulIds.length > 1) {
+          console.log(`[${new Date().toISOString()}] [BatchUpdater] ✅ Successfully verified ${successfulIds.join(', ')} with upload to IPFS in database`);
+        }
       }
 
       if (failed.length > 0) {
@@ -198,10 +207,6 @@ export class BatchUpdater {
           [chunkIds]
         );
 
-        // Debug logging to see what the SELECT actually returns
-        console.log(`[${new Date().toISOString()}] [BatchUpdater] Verification query searched for: ${chunkIds.join(', ')} (types: ${chunkIds.map(id => typeof id).join(', ')})`);
-        console.log(`[${new Date().toISOString()}] [BatchUpdater] Verification query found: ${checkResult.rows.length} records - ${checkResult.rows.map((r: any) => `${r.flash_id}(${typeof r.flash_id}):${r.ipfs_cid || 'NULL'}`).join(', ')}`);
-
         const existingRecords = new Map<number, FlashRecord>(
           checkResult.rows.map((r: any) => [parseInt(r.flash_id), { ipfs_cid: r.ipfs_cid }])
         );
@@ -212,7 +217,6 @@ export class BatchUpdater {
 
           if (!existingRecord) {
             // Record doesn't exist in DB - this is a failure case
-            console.log(`[${new Date().toISOString()}] [BatchUpdater] DEBUG: flash_id ${update.flash_id} not found in verification results. Available flash_ids: ${checkResult.rows.map((r: any) => r.flash_id).join(', ')}`);
             failed.push({ ...update, reason: 'Record not found in database' });
           } else if (existingRecord.ipfs_cid && existingRecord.ipfs_cid !== '' && existingRecord.ipfs_cid !== update.ipfs_cid) {
             // Record already had a different IPFS CID - already processed, don't requeue
