@@ -43,11 +43,11 @@ export function getPool(): Pool {
     // Only log significant connection events in production
     if (process.env.NODE_ENV !== 'production') {
       pool.on('connect', (client) => {
-        console.log('New database connection established');
+        console.log(`[${new Date().toISOString()}] New database connection established`);
       });
 
       pool.on('remove', (client) => {
-        console.log('Database connection removed from pool');
+        console.log(`[${new Date().toISOString()}] Database connection removed from pool`);
       });
     }
 

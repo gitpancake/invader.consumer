@@ -18,6 +18,8 @@ export class BatchUpdater {
   private dbPool: any;
   private batchSize: number;
   private flushTimer: NodeJS.Timeout | null = null;
+  private static failureCount: number = 0;
+  private static readonly FAILURE_LOG_THRESHOLD = 5;
 
   constructor(dbPool: any, batchSize: number = 300) {
     this.dbPool = dbPool;
@@ -81,7 +83,7 @@ export class BatchUpdater {
       try {
         // Only log batch operations in development or on retries
         if (process.env.NODE_ENV !== 'production' || attempt > 1) {
-          console.log(`[BatchUpdater] Writing ${batchToProcess.length} IPFS CIDs to database${attempt > 1 ? ` (attempt ${attempt})` : ''}...`);
+          console.log(`[${new Date().toISOString()}] [BatchUpdater] Writing ${batchToProcess.length} IPFS CIDs to database${attempt > 1 ? ` (attempt ${attempt})` : ''}...`);
         }
 
         // Use parameterized queries instead of string concatenation for memory efficiency
@@ -126,11 +128,17 @@ export class BatchUpdater {
 
       // Log accurate results after verification
       if (successful > 0) {
-        console.log(`[BatchUpdater] ✅ Successfully verified ${successful} IPFS CID updates in database`);
+        console.log(`[${new Date().toISOString()}] [BatchUpdater] ✅ Successfully verified ${successful} IPFS CID updates in database`);
       }
 
       if (failed.length > 0) {
-        console.warn(`[BatchUpdater] ⚠️ ${failed.length} database updates failed and will be requeued to RabbitMQ: ${failed.map((f: BatchUpdate) => f.flash_id).join(', ')}`);
+        BatchUpdater.failureCount++;
+        if (BatchUpdater.failureCount >= BatchUpdater.FAILURE_LOG_THRESHOLD) {
+          console.warn(`[${new Date().toISOString()}] [BatchUpdater] ⚠️ ${failed.length} database updates failed and will be requeued to RabbitMQ (${BatchUpdater.failureCount} consecutive failures): ${failed.map((f: BatchUpdate) => f.flash_id).join(', ')}`);
+          BatchUpdater.failureCount = 0; // Reset counter after logging
+        }
+      } else {
+        BatchUpdater.failureCount = 0; // Reset counter on success
       }
 
       if (alreadyProcessed.length > 0) {
