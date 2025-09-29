@@ -3,13 +3,17 @@ interface BatchUpdate {
   ipfs_cid: string;
 }
 
+interface FailedUpdate extends BatchUpdate {
+  reason: string;
+}
+
 interface FlashRecord {
   ipfs_cid: string | null;
 }
 
 export interface BatchUpdateResult {
   successful: number;
-  failed: BatchUpdate[];
+  failed: FailedUpdate[];
   alreadyProcessed: number[];
 }
 
@@ -101,7 +105,10 @@ export class BatchUpdater {
         `;
 
         const result = await this.dbPool.query(query, [flashIds, ipfsCids]);
-        // Don't log success here - wait for verification to avoid misleading logs
+        // Log the number of rows affected for debugging
+        if (process.env.NODE_ENV !== 'production' || result.rowCount === 0) {
+          console.log(`[${new Date().toISOString()}] [BatchUpdater] UPDATE query affected ${result.rowCount} rows out of ${batchToProcess.length} attempted`);
+        }
         return result;
       } catch (error) {
         const isConnectionError = error instanceof Error && 
@@ -134,7 +141,19 @@ export class BatchUpdater {
       if (failed.length > 0) {
         BatchUpdater.failureCount++;
         if (BatchUpdater.failureCount >= BatchUpdater.FAILURE_LOG_THRESHOLD) {
-          console.warn(`[${new Date().toISOString()}] [BatchUpdater] ⚠️ ${failed.length} database updates failed and will be requeued to RabbitMQ (${BatchUpdater.failureCount} consecutive failures): ${failed.map((f: BatchUpdate) => f.flash_id).join(', ')}`);
+          // Group failures by reason for cleaner logging
+          const failuresByReason = new Map<string, FailedUpdate[]>();
+          failed.forEach(f => {
+            if (!failuresByReason.has(f.reason)) {
+              failuresByReason.set(f.reason, []);
+            }
+            failuresByReason.get(f.reason)!.push(f);
+          });
+
+          console.warn(`[${new Date().toISOString()}] [BatchUpdater] ⚠️ ${failed.length} database updates failed (${BatchUpdater.failureCount} consecutive failures):`);
+          failuresByReason.forEach((failures, reason) => {
+            console.warn(`  - ${reason}: ${failures.map(f => f.flash_id).join(', ')} (will be requeued)`);
+          });
           BatchUpdater.failureCount = 0; // Reset counter after logging
         }
       } else {
@@ -163,8 +182,8 @@ export class BatchUpdater {
     }
   }
 
-  private async processResultsInChunks(batchToProcess: BatchUpdate[], chunkSize: number = 100): Promise<{ successful: number; failed: BatchUpdate[]; alreadyProcessed: number[] }> {
-    const failed: BatchUpdate[] = [];
+  private async processResultsInChunks(batchToProcess: BatchUpdate[], chunkSize: number = 100): Promise<{ successful: number; failed: FailedUpdate[]; alreadyProcessed: number[] }> {
+    const failed: FailedUpdate[] = [];
     const alreadyProcessed: number[] = [];
     let successful = 0;
 
@@ -189,7 +208,7 @@ export class BatchUpdater {
 
           if (!existingRecord) {
             // Record doesn't exist in DB - this is a failure case
-            failed.push(update);
+            failed.push({ ...update, reason: 'Record not found in database' });
           } else if (existingRecord.ipfs_cid && existingRecord.ipfs_cid !== '' && existingRecord.ipfs_cid !== update.ipfs_cid) {
             // Record already had a different IPFS CID - already processed, don't requeue
             alreadyProcessed.push(update.flash_id);
@@ -198,13 +217,13 @@ export class BatchUpdater {
             successful++;
           } else if (!existingRecord.ipfs_cid || existingRecord.ipfs_cid === '') {
             // Should have been updated but wasn't - failure case (only if no ipfs_cid)
-            failed.push(update);
+            failed.push({ ...update, reason: 'Update failed - IPFS CID still empty after update' });
           }
         }
       } catch (error) {
         console.error(`[BatchUpdater] Error processing chunk starting at index ${i}:`, error);
-        // Mark entire chunk as failed
-        failed.push(...chunk);
+        // Mark entire chunk as failed with database error reason
+        failed.push(...chunk.map(update => ({ ...update, reason: `Database error: ${error.message}` })));
       }
     }
 
@@ -213,7 +232,7 @@ export class BatchUpdater {
 
   private async fallbackIndividualUpdates(batch: BatchUpdate[]): Promise<BatchUpdateResult> {
     let successful = 0;
-    const failed: BatchUpdate[] = [];
+    const failed: FailedUpdate[] = [];
     const alreadyProcessed: number[] = [];
 
     for (const update of batch) {
@@ -232,12 +251,12 @@ export class BatchUpdater {
             alreadyProcessed.push(update.flash_id);
           } else {
             // No record found or other issue
-            failed.push(update);
+            failed.push({ ...update, reason: 'Record not found in database' });
           }
         }
       } catch (error) {
         console.error(`[BatchUpdater] Failed individual update for flash_id ${update.flash_id}:`, error);
-        failed.push(update);
+        failed.push({ ...update, reason: `Database error: ${error.message}` });
       }
     }
 
