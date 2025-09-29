@@ -13,7 +13,7 @@ export function getPool(): Pool {
     pool = new Pool({
       connectionString,
       ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
-      max: 8, // Reduced from 15 - fewer connections = less memory per connection
+      max: 1, // Single connection to eliminate connection pool consistency issues
       min: 1, // Reduced from 2 - don't keep idle connections
       idleTimeoutMillis: 15000, // Reduced from 30000 - release idle connections faster
       connectionTimeoutMillis: 8000, // Reduced timeout
@@ -66,7 +66,7 @@ export function getPool(): Pool {
       }, 300000); // Every 5 minutes
     }
 
-    console.log('Database connection pool initialized with memory-optimized settings (max: 8 connections)');
+    console.log('Database connection pool initialized with single connection (max: 1 connection)');
   }
   return pool;
 }
