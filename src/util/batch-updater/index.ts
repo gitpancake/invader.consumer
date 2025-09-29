@@ -199,11 +199,11 @@ export class BatchUpdater {
         );
 
         // Debug logging to see what the SELECT actually returns
-        console.log(`[${new Date().toISOString()}] [BatchUpdater] Verification query searched for: ${chunkIds.join(', ')}`);
-        console.log(`[${new Date().toISOString()}] [BatchUpdater] Verification query found: ${checkResult.rows.length} records - ${checkResult.rows.map((r: any) => `${r.flash_id}:${r.ipfs_cid || 'NULL'}`).join(', ')}`);
+        console.log(`[${new Date().toISOString()}] [BatchUpdater] Verification query searched for: ${chunkIds.join(', ')} (types: ${chunkIds.map(id => typeof id).join(', ')})`);
+        console.log(`[${new Date().toISOString()}] [BatchUpdater] Verification query found: ${checkResult.rows.length} records - ${checkResult.rows.map((r: any) => `${r.flash_id}(${typeof r.flash_id}):${r.ipfs_cid || 'NULL'}`).join(', ')}`);
 
         const existingRecords = new Map<number, FlashRecord>(
-          checkResult.rows.map((r: any) => [r.flash_id, { ipfs_cid: r.ipfs_cid }])
+          checkResult.rows.map((r: any) => [parseInt(r.flash_id), { ipfs_cid: r.ipfs_cid }])
         );
 
         // Process this chunk
