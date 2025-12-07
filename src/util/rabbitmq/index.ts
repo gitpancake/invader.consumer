@@ -30,12 +30,13 @@ export abstract class RabbitMQBaseConsumer {
     
     // Set prefetch for concurrent processing - DataImpulse supports up to 2000 threads
     const prefetchCount = parseInt(process.env.CONSUMER_CONCURRENCY || '1');
+    const rateLimit = parseInt(process.env.CONSUMER_RATE_LIMIT || '250');
     await channel.prefetch(prefetchCount);
     
     if (testMode) {
       console.log(`[RabbitMQBaseConsumer] Running in TEST MODE - messages will NOT be removed from queue`);
     } else {
-      console.log(`[RabbitMQBaseConsumer] Processing messages with concurrency=${prefetchCount} in ${this.queue}. To exit press CTRL+C`);
+      console.log(`[RabbitMQBaseConsumer] Processing messages with concurrency=${prefetchCount}, rate limit=${rateLimit} req/min in ${this.queue}. To exit press CTRL+C`);
     }
     
     channel.consume(
