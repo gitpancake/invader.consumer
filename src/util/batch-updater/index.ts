@@ -94,7 +94,7 @@ export class BatchUpdater {
 
         const result = await this.dbPool.query(query, [flashIds, ipfsCids]);
         // Log concise update info
-        console.log(`[${new Date().toISOString()}] [BatchUpdater] Processing ${batchToProcess.length} IPFS upload${batchToProcess.length === 1 ? '' : 's'} for flash${batchToProcess.length === 1 ? '' : 'es'}: ${batchToProcess.map(u => u.flash_id).join(', ')}`);
+        console.log(`[${new Date().toISOString()}] [BatchUpdater] Processing ${batchToProcess.length} IPFS upload${batchToProcess.length === 1 ? '' : 's'}`);
         return result;
       } catch (error) {
         const isConnectionError = error instanceof Error && 
@@ -128,11 +128,7 @@ export class BatchUpdater {
           return !wasAlreadyProcessed && !wasFailed;
         }).map(u => u.flash_id);
 
-        if (successfulIds.length === 1) {
-          console.log(`[${new Date().toISOString()}] [BatchUpdater] ✅ Successfully verified ${successfulIds[0]} with upload to IPFS in database`);
-        } else if (successfulIds.length > 1) {
-          console.log(`[${new Date().toISOString()}] [BatchUpdater] ✅ Successfully verified ${successfulIds.join(', ')} with upload to IPFS in database`);
-        }
+        console.log(`[${new Date().toISOString()}] [BatchUpdater] ✅ Successfully verified ${successfulIds.length} upload${successfulIds.length === 1 ? '' : 's'} to IPFS in database`);
       }
 
       if (failed.length > 0) {
