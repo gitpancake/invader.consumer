@@ -22,10 +22,9 @@ if (!PINATA_JWT) {
 
 const BASE_URL = "https://api.space-invaders.com";
 
-// Rate limiter for overall processing - configurable rate limit  
-const requestsPerMinute = parseInt(process.env.CONSUMER_RATE_LIMIT || '175');
-const delayMs = Math.floor(60000 / requestsPerMinute); // Convert req/min to delay in ms
-const processingRateLimiter = new RateLimiter(delayMs);
+// Rate limiter for IPFS Pinata API - 250 req/min
+const requestsPerMinute = parseInt(process.env.CONSUMER_RATE_LIMIT || '250');
+const processingRateLimiter = new RateLimiter(requestsPerMinute);
 
 // Common user agents to rotate through for obfuscation
 const USER_AGENTS = [
@@ -305,10 +304,6 @@ class FlashConsumer extends RabbitMQBaseConsumer {
       }
       // Apply rate limiting first
       await processingRateLimiter.waitIfNeeded();
-      
-      // Add human-like delay before making the request
-      const delay = getRandomDelay();
-      await sleep(delay);
 
       const response = await retryRequest(async () => {
         const headers = getRealisticHeaders();
