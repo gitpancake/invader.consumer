@@ -275,7 +275,7 @@ class EnhancedFlashConsumer extends RabbitMQBaseConsumer {
     // Generate filename from flash data
     const filename = `image_${Date.now()}.jpg`;
     
-    const file = new File([imageData.buffer], filename, { type: "image/jpeg" });
+    const file = new File([new Uint8Array(imageData)], filename, { type: "image/jpeg" });
     const formData = new FormData();
     formData.append("file", file);
     formData.append("pinataMetadata", JSON.stringify({ name: filename }));
