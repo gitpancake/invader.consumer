@@ -16,16 +16,20 @@
     "dotenv": "^17.0.0",
     "http-proxy-agent": "^7.0.2",
     "https-proxy-agent": "^7.0.6",
-    "pg": "^8.16.3"
+    "pg": "^8.16.3",
+    "zod": "^3.25.76"
   },
   "engines": {
     "node": ">=19.9.0"
   },
   "scripts": {
     "build": "tsc",
-    "start": "node dist/index.js",
-    "dev": "tsc --watch & nodemon dist/index.js",
-    "test": "TEST_MODE=true node dist/index.js",
-    "prepare": "husky"
+    "start": "node --expose-gc dist/index.js",
+    "dev": "tsc --watch & nodemon --expose-gc dist/index.js",
+    "test": "TEST_MODE=true node --expose-gc dist/index.js",
+    "prepare": "husky",
+    "performance-check": "node dist/scripts/performance-check.js",
+    "health-check": "node dist/scripts/health-check.js",
+    "metrics": "node dist/scripts/metrics-report.js"
   }
 }
