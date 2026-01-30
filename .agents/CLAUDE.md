@@ -30,6 +30,7 @@ Key directories:
 - `src/util/proxy/` - Proxy rotation for downloads
 - `src/util/rate-limiter/` - API request throttling
 - `src/util/config/` - Zod-validated configuration
+- `src/util/health-api/` - NestJS health API microservice
 
 ## Common Commands
 
@@ -61,7 +62,24 @@ npm run metrics        # Export performance metrics
 **Optional proxy (for high volume or rate-limited scenarios):**
 - `PROXY_LIST` - Comma-separated proxy URLs (e.g., `http://proxy1:8080,user:pass@proxy2:3128`)
 
+**Health API (optional):**
+- `HEALTH_API_PORT` - Port for health API (default: 3002)
+- `HEALTH_API_KEY` - API key for protected endpoints (`/health/detailed`, `/health/metrics`)
+- `DASHBOARD_URL` - CORS origin for dashboard (default: `http://localhost:3000`)
+
 Note: AWS credentials (AWS_REGION, BUCKET_NAME, etc.) are NOT required - the AWS SDK dependency is unused.
+
+## Health API Endpoints
+
+The consumer exposes a NestJS health API on port 3002 (configurable via `HEALTH_API_PORT`):
+
+| Endpoint | Auth | Rate Limit | Description |
+|----------|------|------------|-------------|
+| `GET /health` | None | 30/min | Quick health check |
+| `GET /health/detailed` | API key | 10/min | Full status with service checks |
+| `GET /health/metrics` | API key | 10/min | Process and memory metrics |
+
+Protected endpoints require the `x-api-key` header matching `HEALTH_API_KEY`.
 
 ## Database Schema
 

@@ -1,66 +1,73 @@
 {
-  "name": "space-invaders-consumer",
-  "version": "1.0.0",
-  "description": "High-performance consumer service for Space Invaders game data with IPFS integration",
-  "author": "Space Invaders Community",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/your-org/space-invaders-consumer.git"
-  },
-  "homepage": "https://github.com/your-org/space-invaders-consumer#readme",
-  "bugs": {
-    "url": "https://github.com/your-org/space-invaders-consumer/issues"
-  },
-  "keywords": [
-    "space-invaders",
-    "ipfs",
-    "consumer",
-    "rabbitmq",
-    "typescript",
-    "performance",
-    "pinata",
-    "image-processing",
-    "decentralized-storage"
-  ],
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "files": [
-    "dist",
-    "migrations",
-    "README.md",
-    "LICENSE"
-  ],
-  "packageManager": "yarn@4.3.1",
-  "devDependencies": {
-    "@types/amqplib": "^0.10.7",
-    "@types/node": "^24.0.7",
-    "husky": "^9.1.7",
-    "nodemon": "^3.1.10",
-    "typescript": "^5.8.3"
-  },
-  "dependencies": {
-    "@aws-sdk/client-s3": "^3.839.0",
-    "@types/pg": "^8.15.5",
-    "amqplib": "^0.10.8",
-    "axios": "^1.10.0",
-    "dotenv": "^17.0.0",
-    "http-proxy-agent": "^7.0.2",
-    "https-proxy-agent": "^7.0.6",
-    "pg": "^8.16.3",
-    "zod": "^3.25.76"
-  },
-  "engines": {
-    "node": ">=19.9.0"
-  },
-  "scripts": {
-    "build": "tsc",
-    "start": "node --expose-gc dist/index.js",
-    "dev": "tsc --watch & nodemon --expose-gc dist/index.js",
-    "test": "TEST_MODE=true node --expose-gc dist/index.js",
-    "prepare": "husky",
-    "performance-check": "node dist/scripts/performance-check.js",
-    "health-check": "node dist/scripts/health-check.js",
-    "metrics": "node dist/scripts/metrics-report.js"
-  }
+    "name": "space-invaders-consumer",
+    "version": "1.0.0",
+    "description": "High-performance consumer service for Space Invaders game data with IPFS integration",
+    "author": "Space Invaders Community",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/your-org/space-invaders-consumer.git"
+    },
+    "homepage": "https://github.com/your-org/space-invaders-consumer#readme",
+    "bugs": {
+        "url": "https://github.com/your-org/space-invaders-consumer/issues"
+    },
+    "keywords": [
+        "space-invaders",
+        "ipfs",
+        "consumer",
+        "rabbitmq",
+        "typescript",
+        "performance",
+        "pinata",
+        "image-processing",
+        "decentralized-storage"
+    ],
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "files": [
+        "dist",
+        "migrations",
+        "README.md",
+        "LICENSE"
+    ],
+    "packageManager": "yarn@4.3.1",
+    "devDependencies": {
+        "@types/amqplib": "^0.10.7",
+        "@types/node": "^24.0.7",
+        "husky": "^9.1.7",
+        "nodemon": "^3.1.10",
+        "typescript": "^5.8.3"
+    },
+    "dependencies": {
+        "@aws-sdk/client-s3": "^3.839.0",
+        "@nestjs/common": "^11.1.12",
+        "@nestjs/config": "^4.0.2",
+        "@nestjs/core": "^11.1.12",
+        "@nestjs/platform-express": "^11.1.12",
+        "@nestjs/throttler": "^6.5.0",
+        "@types/pg": "^8.15.5",
+        "amqplib": "^0.10.8",
+        "axios": "^1.10.0",
+        "dotenv": "^17.0.0",
+        "http-proxy-agent": "^7.0.2",
+        "https-proxy-agent": "^7.0.6",
+        "pg": "^8.16.3",
+        "reflect-metadata": "^0.2.2",
+        "rxjs": "^7.8.2",
+        "zod": "^3.25.76"
+    },
+    "engines": {
+        "node": ">=19.9.0"
+    },
+    "scripts": {
+        "build": "tsc",
+        "start": "node --expose-gc dist/index.js",
+        "dev": "tsc --watch & nodemon --expose-gc dist/index.js",
+        "test": "TEST_MODE=true node --expose-gc dist/index.js",
+        "prepare": "husky",
+        "performance-check": "node dist/scripts/performance-check.js",
+        "health-check": "node dist/scripts/health-check.js",
+        "metrics": "node dist/scripts/metrics-report.js"
+    }
 }
