@@ -23,7 +23,6 @@ import {
 } from "./util/monitoring/health-checker";
 import { configManager, validateEnvironment } from "./util/config";
 import { circuitBreakerRegistry } from "./util/circuit-breaker";
-import { startHealthApi } from "./util/health-api";
 
 // Validate environment before starting
 validateEnvironment();
@@ -517,7 +516,6 @@ class EnhancedFlashConsumer extends RabbitMQBaseConsumer {
 
     // Start health API
     try {
-        await startHealthApi();
     } catch (error) {
         console.error(
             "[EnhancedFlashConsumer] Failed to start health API:",
