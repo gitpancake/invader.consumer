@@ -31,7 +31,6 @@
         "README.md",
         "LICENSE"
     ],
-    "packageManager": "yarn@4.3.1",
     "devDependencies": {
         "@types/amqplib": "^0.10.7",
         "@types/node": "^24.0.7",
@@ -52,7 +51,7 @@
         "zod": "^3.25.76"
     },
     "engines": {
-        "node": ">=19.9.0"
+        "node": "20.x"
     },
     "scripts": {
         "build": "tsc",
