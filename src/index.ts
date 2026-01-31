@@ -14,6 +14,17 @@ import { getPool } from "./util/database";
 import { proxyRotator } from "./util/proxy";
 import { RabbitMQBaseConsumer } from "./util/rabbitmq";
 import { RateLimiter } from "./util/rate-limiter";
+import {
+  startMetricsServer,
+  flashesProcessedTotal,
+  flashesFailedTotal,
+  ipfsUploadsTotal,
+  ipfsFailuresTotal,
+  circuitBreakerOpen,
+  consecutiveFailures,
+  lastProcessedTimestamp,
+  processingDurationSeconds,
+} from "./util/metrics";
 
 const PINATA_JWT = process.env.PINATA_JWT;
 if (!PINATA_JWT) {
@@ -177,6 +188,8 @@ class FlashConsumer extends RabbitMQBaseConsumer {
       // Circuit breaker timeout expired, reset it
       this.ipfsCircuitBreakerOpen = false;
       this.consecutiveIPFSFailures = 0;
+      circuitBreakerOpen.set(0);
+      consecutiveFailures.set({ type: "ipfs" }, 0);
       console.log(`[FlashConsumer] 🔄 IPFS circuit breaker reset - attempting recovery`);
     }
     return this.ipfsCircuitBreakerOpen;
@@ -184,6 +197,7 @@ class FlashConsumer extends RabbitMQBaseConsumer {
 
   private openIPFSCircuitBreaker(): void {
     this.ipfsCircuitBreakerOpen = true;
+    circuitBreakerOpen.set(1);
     this.ipfsCircuitBreakerOpenUntil = Date.now() + 300000; // 5 minutes
     console.log(`[FlashConsumer] ⚠️ IPFS circuit breaker OPEN for 5 minutes due to ${this.consecutiveIPFSFailures} consecutive failures`);
   }
@@ -271,6 +285,7 @@ class FlashConsumer extends RabbitMQBaseConsumer {
   }
 
   protected async handleMessage(msg: ConsumeMessage): Promise<void> {
+    const processingStart = Date.now();
     const content = msg.content.toString();
     const flash: Flash = JSON.parse(content);
     const imageUrl = BASE_URL + flash.img;
@@ -329,6 +344,7 @@ class FlashConsumer extends RabbitMQBaseConsumer {
           
           // Track API failures to crash on consecutive failures
           this.consecutiveApiFailures++;
+          consecutiveFailures.set({ type: "api" }, this.consecutiveApiFailures);
           
           // Only log when we're getting close to the limit or at the limit
           if (this.consecutiveApiFailures >= this.MAX_API_FAILURES - 2) {
@@ -346,6 +362,7 @@ class FlashConsumer extends RabbitMQBaseConsumer {
 
       // Reset failure counter on successful image download
       this.consecutiveApiFailures = 0;
+      consecutiveFailures.set({ type: "api" }, 0);
 
       const contentType = response.headers["content-type"] || "image/jpeg";
       const contentLength = response.headers["content-length"];
@@ -390,15 +407,19 @@ class FlashConsumer extends RabbitMQBaseConsumer {
         // Retry IPFS upload with longer backoff during migration period
         cid = await retryRequest(uploadToIPFS, 5, 10000); // 5 retries, 10 second base delay for migration period
         ipfsSuccess = true;
+        ipfsUploadsTotal.inc();
         
         // Reset consecutive failure counters on success
+        consecutiveFailures.set({ type: "ipfs" }, 0);
         this.consecutiveIPFSFailures = 0;
       } catch (ipfsError) {
         const errorMsg = ipfsError instanceof Error ? ipfsError.message : "Unknown error";
         console.error(`[${new Date().toISOString()}] [FlashConsumer] ❌ IPFS upload failed after retries: ${errorMsg}`);
+        ipfsFailuresTotal.inc();
         
         // Track consecutive IPFS failures for circuit breaker
         this.consecutiveIPFSFailures++;
+        consecutiveFailures.set({ type: "ipfs" }, this.consecutiveIPFSFailures);
         
         if (this.consecutiveIPFSFailures >= this.MAX_IPFS_FAILURES) {
           this.openIPFSCircuitBreaker();
@@ -425,7 +446,12 @@ class FlashConsumer extends RabbitMQBaseConsumer {
       }
 
       // Report status and throw error if failed
+      const processingDuration = (Date.now() - processingStart) / 1000;
+      processingDurationSeconds.observe(processingDuration);
+
       if (ipfsSuccess) {
+        flashesProcessedTotal.inc();
+        lastProcessedTimestamp.set(Date.now() / 1000);
         // Only log every 100th successful pin to reduce log spam
         if (flash.flash_id % 100 === 0) {
           console.log(`[${new Date().toISOString()}] Successful pin for flash_id ${flash.flash_id}: ${cid}`);
@@ -437,6 +463,7 @@ class FlashConsumer extends RabbitMQBaseConsumer {
       // Add small processing delay to be gentle on the system
       await sleep(300);
     } catch (err) {
+      flashesFailedTotal.inc();
       const errorMsg = err instanceof Error ? err.message : "Unknown error";
       console.log(`[${new Date().toISOString()}] IPFS upload failed for flash_id: ${flash.flash_id}, reason: ${errorMsg}`);
       throw err;
@@ -445,6 +472,10 @@ class FlashConsumer extends RabbitMQBaseConsumer {
 }
 
 (async () => {
+  // Start Prometheus metrics server
+  const metricsPort = parseInt(process.env.METRICS_PORT || "9091");
+  startMetricsServer(metricsPort);
+
   const consumer = new FlashConsumer();
   const testMode = process.env.TEST_MODE === "true";
   
