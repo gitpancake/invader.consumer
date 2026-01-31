@@ -277,13 +277,37 @@ For support and questions:
 - Check the [Performance Improvements](PERFORMANCE_IMPROVEMENTS.md) documentation
 - Review configuration examples above
 
+## 📊 Prometheus Metrics
+
+The consumer exposes Prometheus metrics on port 9091:
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /metrics` | Prometheus metrics endpoint |
+| `GET /` | Also serves metrics (for flexibility) |
+
+**Key metrics exposed:**
+- `invaders_consumer_flashes_processed_total` - Total flashes processed
+- `invaders_consumer_flashes_failed_total` - Failed flash processing attempts
+- `invaders_consumer_ipfs_uploads_total` - Successful IPFS uploads
+- `invaders_consumer_ipfs_failures_total` - Failed IPFS uploads
+- `invaders_consumer_processing_duration_seconds` - Processing duration histogram
+- `invaders_consumer_queue_depth` - Current RabbitMQ queue depth
+- `invaders_consumer_circuit_breaker_state` - Circuit breaker status (0=closed, 1=open)
+- `invaders_consumer_consecutive_failures` - Consecutive failure count
+- `invaders_consumer_last_processed_timestamp` - Timestamp of last processed flash
+- `invaders_consumer_uptime_seconds` - Service uptime
+- `invaders_consumer_memory_bytes` - Memory usage by type (heap_used, heap_total, rss, external)
+
+**Note:** This service runs on DigitalOcean and does not have distributed tracing enabled (unlike the Producer and API on Railway).
+
 ## 🎯 Roadmap
 
 - [ ] WebSocket real-time monitoring dashboard
 - [ ] Kubernetes deployment manifests  
 - [ ] Advanced alerting integrations
 - [ ] Multi-region IPFS gateway support
-- [ ] Enhanced metrics exporters (Prometheus, Grafana)
+- [x] Enhanced metrics exporters (Prometheus, Grafana)
 
 ---
 
