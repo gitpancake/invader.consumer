@@ -30,7 +30,7 @@ Key directories:
 - `src/util/proxy/` - Proxy rotation for downloads
 - `src/util/rate-limiter/` - API request throttling
 - `src/util/config/` - Zod-validated configuration
-- `src/util/health-api/` - NestJS health API microservice
+- `src/util/metrics/` - Prometheus metrics server
 
 ## Common Commands
 
@@ -62,24 +62,29 @@ npm run metrics        # Export performance metrics
 **Optional proxy (for high volume or rate-limited scenarios):**
 - `PROXY_LIST` - Comma-separated proxy URLs (e.g., `http://proxy1:8080,user:pass@proxy2:3128`)
 
-**Health API (optional):**
-- `HEALTH_API_PORT` - Port for health API (default: 3002)
-- `HEALTH_API_KEY` - API key for protected endpoints (`/health/detailed`, `/health/metrics`)
-- `DASHBOARD_URL` - CORS origin for dashboard (default: `http://localhost:3000`)
-
 Note: AWS credentials (AWS_REGION, BUCKET_NAME, etc.) are NOT required - the AWS SDK dependency is unused.
 
-## Health API Endpoints
+## Prometheus Metrics
 
-The consumer exposes a NestJS health API on port 3002 (configurable via `HEALTH_API_PORT`):
+The consumer exposes Prometheus metrics on port 9091:
 
-| Endpoint | Auth | Rate Limit | Description |
-|----------|------|------------|-------------|
-| `GET /health` | None | 30/min | Quick health check |
-| `GET /health/detailed` | API key | 10/min | Full status with service checks |
-| `GET /health/metrics` | API key | 10/min | Process and memory metrics |
+| Endpoint | Description |
+|----------|-------------|
+| `GET /metrics` | Prometheus metrics endpoint |
+| `GET /` | Also serves metrics (for flexibility) |
 
-Protected endpoints require the `x-api-key` header matching `HEALTH_API_KEY`.
+**Key metrics exposed:**
+- `invaders_consumer_flashes_processed_total` - Total flashes processed
+- `invaders_consumer_flashes_failed_total` - Failed flash processing attempts
+- `invaders_consumer_ipfs_uploads_total` - Successful IPFS uploads
+- `invaders_consumer_ipfs_failures_total` - Failed IPFS uploads
+- `invaders_consumer_processing_duration_seconds` - Processing duration histogram
+- `invaders_consumer_queue_depth` - Current RabbitMQ queue depth
+- `invaders_consumer_circuit_breaker_state` - Circuit breaker status (0=closed, 1=open)
+- `invaders_consumer_consecutive_failures` - Consecutive failure count
+- `invaders_consumer_last_processed_timestamp` - Timestamp of last processed flash
+- `invaders_consumer_uptime_seconds` - Service uptime
+- `invaders_consumer_memory_bytes` - Memory usage by type (heap_used, heap_total, rss, external)
 
 ## Database Schema
 
