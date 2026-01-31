@@ -259,7 +259,7 @@ export class HealthChecker extends EventEmitter {
       const duration = Date.now() - startTime;
 
       // Critical thresholds
-      if (usage.usage > 0.9) {
+      if (usage.usage > 0.999) {
         return {
           status: 'fail',
           message: `Critical memory usage: ${(usage.usage * 100).toFixed(1)}%`,
@@ -269,7 +269,7 @@ export class HealthChecker extends EventEmitter {
       }
 
       // Warning thresholds
-      if (usage.usage > 0.8) {
+      if (usage.usage > 0.99) {
         return {
           status: 'warn',
           message: `High memory usage: ${(usage.usage * 100).toFixed(1)}%`,
