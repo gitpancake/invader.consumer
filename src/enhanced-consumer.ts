@@ -1,3 +1,7 @@
+// Initialize tracing before all other imports
+import { initTracing } from "./util/tracing";
+const tracingSdk = initTracing();
+
 import { config } from "dotenv";
 
 // Load environment variables FIRST before any other imports
