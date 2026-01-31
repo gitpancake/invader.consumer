@@ -142,7 +142,6 @@ tmp/
 *.orig
 
 # Docker
-.dockerignore
 
 # Terraform
 *.tfstate
