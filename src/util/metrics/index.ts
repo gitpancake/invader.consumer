@@ -120,7 +120,6 @@ setInterval(() => {
 export function startMetricsServer(port: number = 9091): void {
     const server = http.createServer(async (req, res) => {
         const url = req.url?.split("?")[0] || "";
-        console.log(`[Metrics] Request: ${req.url} -> parsed path: ${url}`);
 
         if (url === "/metrics" || url === "/") {
             try {
