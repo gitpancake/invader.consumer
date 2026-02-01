@@ -17,7 +17,6 @@ interface IdentificationResponse {
 }
 
 const EMBEDDINGS_API_URL = process.env.EMBEDDINGS_API_URL;
-const CONFIDENCE_THRESHOLD = 0.8;
 const RESIZE_MAX_DIMENSION = 384; // CLIP uses 224x224, so 384 gives plenty of detail
 
 /**
@@ -40,7 +39,8 @@ export class EmbeddingsClient {
     }
 
     /**
-     * Identify a flash from image data and store if confidence is high enough
+     * Identify a flash from image data and store the top match
+     * Stores regardless of confidence - filtering happens in invaders.bot
      * This is a non-blocking operation - failures are logged but don't interrupt processing
      */
     async identifyAndStore(
@@ -52,9 +52,9 @@ export class EmbeddingsClient {
         try {
             // Resize image before sending to reduce payload size
             const resizedImage = await this.resizeImage(imageData);
-            
+
             const match = await this.identify(resizedImage);
-            if (match && match.confidence >= CONFIDENCE_THRESHOLD) {
+            if (match) {
                 await this.storeIdentification(sourceIpfsCid, match);
                 console.log(
                     `[EmbeddingsClient] Identified ${sourceIpfsCid} as ${match.flash_name} (${(match.confidence * 100).toFixed(1)}% confidence)`,
@@ -134,8 +134,8 @@ export class EmbeddingsClient {
         match: IdentificationMatch,
     ): Promise<void> {
         await databasePool.query(
-            `INSERT INTO flash_identifications 
-             (source_ipfs_cid, matched_flash_id, matched_flash_name, similarity, confidence) 
+            `INSERT INTO flash_identifications
+             (source_ipfs_cid, matched_flash_id, matched_flash_name, similarity, confidence)
              VALUES ($1, $2, $3, $4, $5)`,
             [
                 sourceIpfsCid,
