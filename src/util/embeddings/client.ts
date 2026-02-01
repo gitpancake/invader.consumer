@@ -1,5 +1,4 @@
 import axios from "axios";
-import sharp from "sharp";
 import { databasePool } from "../database/connection-pool";
 
 interface IdentificationMatch {
@@ -17,7 +16,6 @@ interface IdentificationResponse {
 }
 
 const EMBEDDINGS_API_URL = process.env.EMBEDDINGS_API_URL;
-const RESIZE_MAX_DIMENSION = 384; // CLIP uses 224x224, so 384 gives plenty of detail
 
 /**
  * Client for the invaders.embeddings flash identification API
@@ -50,10 +48,7 @@ export class EmbeddingsClient {
         if (!this.enabled) return;
 
         try {
-            // Resize image before sending to reduce payload size
-            const resizedImage = await this.resizeImage(imageData);
-
-            const match = await this.identify(resizedImage);
+            const match = await this.identify(imageData);
             if (match) {
                 await this.storeIdentification(sourceIpfsCid, match);
                 console.log(
@@ -66,29 +61,6 @@ export class EmbeddingsClient {
             console.warn(
                 `[EmbeddingsClient] Flash identification failed for ${sourceIpfsCid}: ${errorMsg}`,
             );
-        }
-    }
-
-    /**
-     * Resize image to reduce payload size while maintaining quality for CLIP
-     * Resizes to max 384px on longest edge, preserving aspect ratio
-     */
-    private async resizeImage(imageData: Buffer): Promise<Buffer> {
-        try {
-            return await sharp(imageData)
-                .resize(RESIZE_MAX_DIMENSION, RESIZE_MAX_DIMENSION, {
-                    fit: "inside", // Preserve aspect ratio, fit within bounds
-                    withoutEnlargement: true, // Don't upscale small images
-                })
-                .jpeg({ quality: 85 }) // Good balance of size vs quality
-                .toBuffer();
-        } catch (error) {
-            // If resize fails, fall back to original image
-            console.warn(
-                `[EmbeddingsClient] Image resize failed, using original:`,
-                error instanceof Error ? error.message : "Unknown error",
-            );
-            return imageData;
         }
     }
 
