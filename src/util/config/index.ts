@@ -1,5 +1,4 @@
 import { z } from 'zod';
-
 // Configuration schemas with validation
 const DatabaseConfigSchema = z.object({
   pool: z.object({
@@ -14,7 +13,6 @@ const DatabaseConfigSchema = z.object({
     delay: z.number().min(100).default(2000)
   })
 });
-
 const ProcessingConfigSchema = z.object({
   concurrency: z.number().min(1).max(20).default(3),
   batchSize: z.number().min(10).max(1000).default(100),
@@ -23,7 +21,6 @@ const ProcessingConfigSchema = z.object({
   retries: z.number().min(0).max(5).default(3),
   gcThreshold: z.number().min(0.5).max(0.95).default(0.85)
 });
-
 const MonitoringConfigSchema = z.object({
   enabled: z.boolean().default(true),
   interval: z.number().min(1000).max(300000).default(30000),
@@ -43,20 +40,17 @@ const MonitoringConfigSchema = z.object({
     })
   })
 });
-
 const ProxyConfigSchema = z.object({
   enabled: z.boolean().default(false),
   rotation: z.boolean().default(true),
   healthCheck: z.boolean().default(true),
   timeout: z.number().min(5000).max(60000).default(20000)
 });
-
 const PinataConfigSchema = z.object({
   timeout: z.number().min(5000).max(180000).default(60000),
   retries: z.number().min(0).max(5).default(3),
   retryDelay: z.number().min(1000).max(10000).default(2000)
 });
-
 const AppConfigSchema = z.object({
   environment: z.enum(['development', 'production', 'test']).default('development'),
   database: DatabaseConfigSchema,
@@ -65,21 +59,17 @@ const AppConfigSchema = z.object({
   proxy: ProxyConfigSchema,
   pinata: PinataConfigSchema
 });
-
 export type AppConfig = z.infer<typeof AppConfigSchema>;
 export type DatabaseConfig = z.infer<typeof DatabaseConfigSchema>;
 export type ProcessingConfig = z.infer<typeof ProcessingConfigSchema>;
 export type MonitoringConfig = z.infer<typeof MonitoringConfigSchema>;
-
 class ConfigManager {
   private config: AppConfig;
   private readonly configOverrides: Map<string, any> = new Map();
-
   constructor() {
     this.config = this.loadConfiguration();
     this.validateConfiguration();
   }
-
   /**
    * Load configuration from environment variables
    */
@@ -138,10 +128,8 @@ class ConfigManager {
         retryDelay: this.parseNumber(process.env.PINATA_RETRY_DELAY, 2000)
       }
     };
-
     return rawConfig as AppConfig;
   }
-
   /**
    * Validate configuration against schema
    */
@@ -154,78 +142,65 @@ class ConfigManager {
       throw new Error('Invalid configuration');
     }
   }
-
   /**
    * Get the full configuration
    */
   get(): AppConfig {
     return this.config;
   }
-
   /**
    * Get database configuration
    */
   getDatabase(): DatabaseConfig {
     return this.config.database;
   }
-
   /**
    * Get processing configuration
    */
   getProcessing(): ProcessingConfig {
     return this.config.processing;
   }
-
   /**
    * Get monitoring configuration
    */
   getMonitoring(): MonitoringConfig {
     return this.config.monitoring;
   }
-
   /**
    * Get environment-specific configuration
    */
   getEnvironment(): 'development' | 'production' | 'test' {
     return this.config.environment;
   }
-
   /**
    * Check if running in production
    */
   isProduction(): boolean {
     return this.config.environment === 'production';
   }
-
   /**
    * Check if running in development
    */
   isDevelopment(): boolean {
     return this.config.environment === 'development';
   }
-
   /**
    * Override a configuration value (for testing)
    */
   override(path: string, value: any): void {
     this.configOverrides.set(path, value);
-    
     // Apply override to current config
     const keys = path.split('.');
     let current: any = this.config;
-    
     for (let i = 0; i < keys.length - 1; i++) {
       if (!(keys[i] in current)) {
         current[keys[i]] = {};
       }
       current = current[keys[i]];
     }
-    
     current[keys[keys.length - 1]] = value;
-    
     console.log(`[ConfigManager] Configuration override: ${path} = ${value}`);
   }
-
   /**
    * Clear all overrides
    */
@@ -235,7 +210,6 @@ class ConfigManager {
     this.validateConfiguration();
     console.log('[ConfigManager] Configuration overrides cleared');
   }
-
   /**
    * Get configuration summary for logging
    */
@@ -250,7 +224,6 @@ class ConfigManager {
       proxyEnabled: this.config.proxy.enabled
     };
   }
-
   /**
    * Update configuration from environment changes
    */
@@ -259,49 +232,38 @@ class ConfigManager {
     this.config = this.loadConfiguration();
     this.validateConfiguration();
   }
-
   // Utility parsing functions
   private parseNumber(value: string | undefined, defaultValue: number): number {
     if (!value) return defaultValue;
     const parsed = parseInt(value, 10);
     return isNaN(parsed) ? defaultValue : parsed;
   }
-
   private parseFloat(value: string | undefined, defaultValue: number): number {
     if (!value) return defaultValue;
     const parsed = parseFloat(value);
     return isNaN(parsed) ? defaultValue : parsed;
   }
-
   private parseBoolean(value: string | undefined, defaultValue: boolean): boolean {
     if (!value) return defaultValue;
     return value.toLowerCase() === 'true' || value === '1';
   }
 }
-
 // Export singleton instance
 export const configManager = new ConfigManager();
-
 // Environment validation
 export function validateEnvironment(): void {
   const required = [
     'DATABASE_URL',
     'RABBITMQ_URL',
     'RABBITMQ_QUEUE',
-    'PINATA_API_KEY',
-    'PINATA_API_SECRET'
   ];
-
   const missing = required.filter(key => !process.env[key]);
-  
   if (missing.length > 0) {
     console.error('[ConfigManager] Missing required environment variables:', missing);
     throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
   }
-
   console.log('[ConfigManager] Required environment variables validated');
 }
-
 // Configuration presets
 export const configPresets = {
   development: {
@@ -311,7 +273,6 @@ export const configPresets = {
     'monitoring.interval': 60000,
     'database.pool.max': 10
   },
-  
   production: {
     'processing.concurrency': 5,
     'processing.batchSize': 300,
@@ -319,7 +280,6 @@ export const configPresets = {
     'monitoring.interval': 30000,
     'database.pool.max': 20
   },
-  
   highVolume: {
     'processing.concurrency': 10,
     'processing.batchSize': 500,
@@ -327,16 +287,13 @@ export const configPresets = {
     'database.pool.max': 50
   }
 };
-
 export function applyPreset(presetName: keyof typeof configPresets): void {
   const preset = configPresets[presetName];
   if (!preset) {
     throw new Error(`Unknown configuration preset: ${presetName}`);
   }
-
   Object.entries(preset).forEach(([path, value]) => {
     configManager.override(path, value);
   });
-
   console.log(`[ConfigManager] Applied configuration preset: ${presetName}`);
 }
