@@ -23,6 +23,8 @@ import {
 } from "./util/monitoring/health-checker";
 import { configManager, validateEnvironment } from "./util/config";
 import { circuitBreakerRegistry } from "./util/circuit-breaker";
+import { embeddingsClient } from "./util/embeddings/client";
+import { startMetricsServer } from "./util/metrics";
 
 // Validate environment before starting
 validateEnvironment();
@@ -241,6 +243,16 @@ class EnhancedFlashConsumer extends RabbitMQBaseConsumer {
             if (ipfsHash) {
                 await this.batchUpdater.addUpdate(flash.flash_id, ipfsHash);
                 metricsCollector.recordProcessing("flash", startTime, true);
+
+                // Identify flash using embeddings API (non-blocking)
+                embeddingsClient
+                    .identifyAndStore(ipfsHash, imageData)
+                    .catch((err) =>
+                        console.warn(
+                            `[EnhancedFlashConsumer] Flash identification failed for ${flash.flash_id}:`,
+                            err.message,
+                        ),
+                    );
 
                 // Log successful processing occasionally
                 if (flash.flash_id % 100 === 0) {
@@ -514,14 +526,9 @@ class EnhancedFlashConsumer extends RabbitMQBaseConsumer {
         `[EnhancedFlashConsumer] Configuration: ${JSON.stringify(configManager.getSummary())}`,
     );
 
-    // Start health API
-    try {
-    } catch (error) {
-        console.error(
-            "[EnhancedFlashConsumer] Failed to start health API:",
-            error,
-        );
-    }
+    // Start Prometheus metrics server
+    const metricsPort = parseInt(process.env.METRICS_PORT || "9091");
+    startMetricsServer(metricsPort);
 
     // Initialize proxy system
     await proxyRotator.initialize();
