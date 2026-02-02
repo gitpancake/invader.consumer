@@ -186,9 +186,7 @@ class ConfigManager {
     private validateConfiguration(): void {
         try {
             this.config = AppConfigSchema.parse(this.config);
-            console.log(
-                `[ConfigManager] Configuration validated successfully (env: ${this.config.environment})`,
-            );
+            // Config validated - shown in startup banner
         } catch (error) {
             console.error(
                 "[ConfigManager] Configuration validation failed:",

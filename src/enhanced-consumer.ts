@@ -1,10 +1,14 @@
 import { config } from "dotenv";
 
-// Load environment variables FIRST before any other imports - suppress tips
+// Load environment variables FIRST before any other imports
+// Use quiet mode to suppress tips
 config({ path: ".env" });
 
-// Suppress dotenv tips in logs
-process.env.DOTENV_CONFIG_DEBUG = "";
+// Ensure dotenv doesn't log tips
+if (process.env.npm_package_version) {
+    // Running via npm - dotenv may log tips, suppress them
+    process.env.DOTENV_CONFIG_QUIET = "true";
+}
 
 import { ConsumeMessage } from "amqplib";
 import axios from "axios";
