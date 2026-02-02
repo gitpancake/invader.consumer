@@ -1,7 +1,10 @@
 import { config } from "dotenv";
 
-// Load environment variables FIRST before any other imports
+// Load environment variables FIRST before any other imports - suppress tips
 config({ path: ".env" });
+
+// Suppress dotenv tips in logs
+process.env.DOTENV_CONFIG_DEBUG = "";
 
 import { ConsumeMessage } from "amqplib";
 import axios from "axios";
@@ -24,7 +27,16 @@ import {
 import { configManager, validateEnvironment } from "./util/config";
 import { circuitBreakerRegistry } from "./util/circuit-breaker";
 import { embeddingsClient } from "./util/embeddings/client";
-import { startMetricsServer, flashesProcessedTotal, flashesFailedTotal, ipfsUploadsTotal, ipfsFailuresTotal, lastProcessedTimestamp, consecutiveFailures as consecutiveFailuresGauge, circuitBreakerOpen } from "./util/metrics";
+import {
+    startMetricsServer,
+    flashesProcessedTotal,
+    flashesFailedTotal,
+    ipfsUploadsTotal,
+    ipfsFailuresTotal,
+    lastProcessedTimestamp,
+    consecutiveFailures as consecutiveFailuresGauge,
+    circuitBreakerOpen,
+} from "./util/metrics";
 
 // Validate environment before starting
 validateEnvironment();
@@ -69,13 +81,8 @@ class EnhancedFlashConsumer extends RabbitMQBaseConsumer {
     constructor() {
         super();
 
-        // Get configuration
+        // Get configuration (silent init - logging happens in main)
         const config = configManager.get();
-
-        console.log(
-            "[EnhancedFlashConsumer] Initializing with configuration:",
-            configManager.getSummary(),
-        );
 
         // Initialize components
         this.batchUpdater = new BatchUpdater(
@@ -146,7 +153,7 @@ class EnhancedFlashConsumer extends RabbitMQBaseConsumer {
             },
         );
 
-        console.log("[EnhancedFlashConsumer] Circuit breakers configured");
+        // Circuit breakers configured silently
     }
 
     private startMonitoring(): void {
@@ -165,7 +172,7 @@ class EnhancedFlashConsumer extends RabbitMQBaseConsumer {
                 this.logSystemStatus();
             }, monitoringConfig.interval);
 
-            console.log("[EnhancedFlashConsumer] Monitoring systems started");
+            // Monitoring started silently
         }
     }
 
@@ -282,7 +289,10 @@ class EnhancedFlashConsumer extends RabbitMQBaseConsumer {
             );
 
             this.consecutiveApiFailures++;
-            consecutiveFailuresGauge.set({ type: "api" }, this.consecutiveApiFailures);
+            consecutiveFailuresGauge.set(
+                { type: "api" },
+                this.consecutiveApiFailures,
+            );
 
             // Emergency shutdown on too many failures
             if (this.consecutiveApiFailures >= 50) {
@@ -523,17 +533,55 @@ class EnhancedFlashConsumer extends RabbitMQBaseConsumer {
     }
 }
 
+// Startup banner and configuration display
+function printStartupBanner(testMode: boolean): void {
+    const config = configManager.get();
+    const summary = configManager.getSummary();
+
+    console.log("");
+    console.log(
+        "╔════════════════════════════════════════════════════════════╗",
+    );
+    console.log(
+        "║           INVADERS CONSUMER - Flash Image Processor        ║",
+    );
+    console.log(
+        "╚════════════════════════════════════════════════════════════╝",
+    );
+    console.log("");
+    console.log(`  Mode:           ${testMode ? "TEST" : "PRODUCTION"}`);
+    console.log(`  Environment:    ${summary.environment}`);
+    console.log("");
+    console.log("  Processing:");
+    console.log(`    Concurrency:  ${summary.concurrency} workers`);
+    console.log(`    Batch Size:   ${summary.batchSize}`);
+    console.log(`    Rate Limit:   ${summary.rateLimit} req/min`);
+    console.log("");
+    console.log("  Database:");
+    console.log(`    Pool Size:    ${summary.dbPoolMax} connections`);
+    console.log("");
+    console.log("  Features:");
+    console.log(
+        `    Monitoring:   ${summary.monitoringEnabled ? "enabled" : "disabled"}`,
+    );
+    console.log(
+        `    Proxy:        ${summary.proxyEnabled ? "enabled" : "disabled"}`,
+    );
+    console.log(
+        `    Embeddings:   ${process.env.EMBEDDINGS_API_URL ? "enabled" : "disabled"}`,
+    );
+    console.log("");
+}
+
 // Main execution
 (async () => {
-    const consumer = new EnhancedFlashConsumer();
     const testMode = process.env.TEST_MODE === "true";
 
-    console.log(
-        `[EnhancedFlashConsumer] Starting in ${testMode ? "TEST" : "PRODUCTION"} mode`,
-    );
-    console.log(
-        `[EnhancedFlashConsumer] Configuration: ${JSON.stringify(configManager.getSummary())}`,
-    );
+    // Print startup banner first
+    printStartupBanner(testMode);
+
+    // Initialize consumer (silent)
+    const consumer = new EnhancedFlashConsumer();
 
     // Start Prometheus metrics server
     const metricsPort = parseInt(process.env.METRICS_PORT || "9091");
@@ -542,15 +590,14 @@ class EnhancedFlashConsumer extends RabbitMQBaseConsumer {
     // Initialize proxy system
     await proxyRotator.initialize();
 
-    if (proxyRotator.getTotalProxyCount() > 0) {
-        console.log(
-            `[EnhancedFlashConsumer] Proxy system: ${proxyRotator.getProxyCount()}/${proxyRotator.getTotalProxyCount()} proxies active`,
-        );
-    } else {
-        console.log(
-            "[EnhancedFlashConsumer] No proxy configured - using direct connections",
-        );
-    }
+    // Print connection status
+    console.log("  Connections:");
+    const proxyCount = proxyRotator.getTotalProxyCount();
+    console.log(
+        `    Proxies:      ${proxyCount > 0 ? `${proxyRotator.getProxyCount()}/${proxyCount} active` : "direct (no proxy)"}`,
+    );
+    console.log(`    Metrics:      http://localhost:${metricsPort}/metrics`);
+    console.log("");
 
     // Graceful shutdown handlers
     const shutdown = async (signal: string) => {

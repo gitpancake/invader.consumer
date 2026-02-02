@@ -139,10 +139,6 @@ export function startMetricsServer(port: number = 9091): void {
     });
 
     server.listen(port, () => {
-        console.log(
-            "[Metrics] Prometheus metrics available at http://localhost:" +
-                port +
-                "/metrics",
-        );
+        // Logged in main startup banner instead
     });
 }

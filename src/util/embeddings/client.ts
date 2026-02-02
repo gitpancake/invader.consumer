@@ -28,15 +28,7 @@ export class EmbeddingsClient {
 
     constructor() {
         this.enabled = !!EMBEDDINGS_API_URL;
-        if (this.enabled) {
-            console.log(
-                `[EmbeddingsClient] Initialized with API URL: ${EMBEDDINGS_API_URL}`,
-            );
-        } else {
-            console.log(
-                "[EmbeddingsClient] EMBEDDINGS_API_URL not set - flash identification disabled",
-            );
-        }
+        // Embeddings status shown in startup banner
     }
 
     /**
