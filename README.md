@@ -54,7 +54,9 @@ DATABASE_URL=postgresql://username:password@localhost:5432/database_name
 
 # Pinata Configuration (IPFS)
 PINATA_JWT=your_pinata_jwt_token
-```
+
+# Flash Identification (optional)
+EMBEDDINGS_API_URL=https://your-embeddings-service.railway.app```
 
 ### Optional Performance Settings
 
@@ -178,8 +180,9 @@ Exports performance metrics and generates trend analysis reports.
 1. **Message Consumption**: Receives Flash objects from RabbitMQ
 2. **Image Download**: Fetches images from Space Invaders API with proxy support
 3. **IPFS Upload**: Stores images on IPFS via Pinata gateway
-4. **Database Update**: Records IPFS CIDs using batch operations
-5. **Monitoring**: Tracks performance metrics and system health
+4. **Flash Identification**: Identifies flashes using CLIP embeddings (optional)
+5. **Database Update**: Records IPFS CIDs and identifications using batch operations
+6. **Monitoring**: Tracks performance metrics and system health
 
 ### Performance Features
 
@@ -188,6 +191,40 @@ Exports performance metrics and generates trend analysis reports.
 - **Memory Streaming**: Process large datasets efficiently  
 - **Circuit Breakers**: Prevent cascading failures
 - **Rate Limiting**: Respect API quotas and limits
+
+## 🔍 Flash Identification
+
+The consumer integrates with the `invaders.embeddings` service to automatically identify Space Invader flashes using CLIP embeddings and FAISS similarity search.
+
+### How It Works
+
+1. After uploading an image to IPFS, the consumer sends it to the embeddings API
+2. The embeddings service extracts the mosaic region using grid detection
+3. CLIP generates a 768-dimensional embedding vector
+4. FAISS searches for the most similar reference flash (~3,900 known flashes)
+5. If similarity >= 80%, the identification is stored in `flash_identifications` table
+
+### Configuration
+
+Set `EMBEDDINGS_API_URL` to enable flash identification:
+
+```env
+EMBEDDINGS_API_URL=https://invaders-embeddings.up.railway.app
+```
+
+If not set, flash identification is disabled and processing continues normally.
+
+### Database Schema
+
+Identifications are stored in the `flash_identifications` table:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| source_ipfs_cid | TEXT | IPFS hash of the query image |
+| matched_flash_id | BIGINT | Identified flash ID |
+| matched_flash_name | TEXT | Flash name (e.g., PA_1234) |
+| similarity | FLOAT | Cosine similarity (0.0-1.0) |
+| confidence | FLOAT | Confidence score (0.0-1.0) |
 
 ## 🔧 Configuration Management
 
