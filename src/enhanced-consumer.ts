@@ -24,7 +24,7 @@ import {
 import { configManager, validateEnvironment } from "./util/config";
 import { circuitBreakerRegistry } from "./util/circuit-breaker";
 import { embeddingsClient } from "./util/embeddings/client";
-import { startMetricsServer } from "./util/metrics";
+import { startMetricsServer, flashesProcessedTotal, flashesFailedTotal, ipfsUploadsTotal, ipfsFailuresTotal, lastProcessedTimestamp, consecutiveFailures as consecutiveFailuresGauge, circuitBreakerOpen } from "./util/metrics";
 
 // Validate environment before starting
 validateEnvironment();
@@ -241,6 +241,10 @@ class EnhancedFlashConsumer extends RabbitMQBaseConsumer {
 
             // Add to batch updater
             if (ipfsHash) {
+                // Increment Prometheus metrics
+                flashesProcessedTotal.inc();
+                ipfsUploadsTotal.inc();
+                lastProcessedTimestamp.set(Date.now() / 1000);
                 await this.batchUpdater.addUpdate(flash.flash_id, ipfsHash);
                 metricsCollector.recordProcessing("flash", startTime, true);
 
@@ -264,8 +268,12 @@ class EnhancedFlashConsumer extends RabbitMQBaseConsumer {
 
             // Reset failure counters on success
             this.consecutiveApiFailures = 0;
+            consecutiveFailuresGauge.set({ type: "api" }, 0);
         } catch (error) {
             metricsCollector.recordProcessing("flash", startTime, false);
+
+            // Increment Prometheus failure metrics
+            flashesFailedTotal.inc();
 
             const errorMsg =
                 error instanceof Error ? error.message : "Unknown error";
@@ -274,6 +282,7 @@ class EnhancedFlashConsumer extends RabbitMQBaseConsumer {
             );
 
             this.consecutiveApiFailures++;
+            consecutiveFailuresGauge.set({ type: "api" }, this.consecutiveApiFailures);
 
             // Emergency shutdown on too many failures
             if (this.consecutiveApiFailures >= 50) {
