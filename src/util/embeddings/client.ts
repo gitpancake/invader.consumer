@@ -17,6 +17,9 @@ interface IdentificationResponse {
 
 const EMBEDDINGS_API_URL = process.env.EMBEDDINGS_API_URL;
 
+// Minimum similarity threshold for storing identifications (80%)
+const MIN_SIMILARITY_THRESHOLD = 0.8;
+
 /**
  * Client for the invaders.embeddings flash identification API
  */
@@ -37,8 +40,7 @@ export class EmbeddingsClient {
     }
 
     /**
-     * Identify a flash from image data and store the top match
-     * Stores regardless of confidence - filtering happens in invaders.bot
+     * Identify a flash from image data and store if similarity >= 80%
      * This is a non-blocking operation - failures are logged but don't interrupt processing
      */
     async identifyAndStore(
@@ -50,10 +52,16 @@ export class EmbeddingsClient {
         try {
             const match = await this.identify(imageData);
             if (match) {
-                await this.storeIdentification(sourceIpfsCid, match);
-                console.log(
-                    `[EmbeddingsClient] Identified ${sourceIpfsCid} as ${match.flash_name} (${(match.confidence * 100).toFixed(1)}% confidence)`,
-                );
+                if (match.similarity >= MIN_SIMILARITY_THRESHOLD) {
+                    await this.storeIdentification(sourceIpfsCid, match);
+                    console.log(
+                        `[EmbeddingsClient] Identified ${sourceIpfsCid} as ${match.flash_name} (${(match.similarity * 100).toFixed(1)}% similarity) - stored`,
+                    );
+                } else {
+                    console.log(
+                        `[EmbeddingsClient] Low confidence match for ${sourceIpfsCid}: ${match.flash_name} (${(match.similarity * 100).toFixed(1)}% similarity) - not stored`,
+                    );
+                }
             }
         } catch (error) {
             const errorMsg =
