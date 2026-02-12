@@ -236,10 +236,9 @@ export class HealthChecker extends EventEmitter {
         try {
             // Simple test - this would need to be implemented based on your Pinata usage
             // For now, we'll check if the API key is available
-            const apiKey = process.env.PINATA_API_KEY;
-            const apiSecret = process.env.PINATA_API_SECRET;
+            const jwt = process.env.PINATA_JWT;
 
-            if (!apiKey || !apiSecret) {
+            if (!jwt) {
                 return {
                     status: "fail",
                     message: "Pinata credentials not configured",
@@ -330,7 +329,7 @@ export class HealthChecker extends EventEmitter {
 
         try {
             const fs = require("fs");
-            const stats = await fs.promises.statSync(process.cwd());
+            const stats = await fs.promises.stat(process.cwd());
 
             // Note: Getting actual disk space requires platform-specific commands
             // This is a simplified check
