@@ -138,7 +138,8 @@ export function startMetricsServer(port: number = 9091): void {
         }
     });
 
-    server.listen(port, () => {
+    // Bind to localhost only for security - external access via Caddy reverse proxy
+    server.listen(port, "127.0.0.1", () => {
         // Logged in main startup banner instead
     });
 }
